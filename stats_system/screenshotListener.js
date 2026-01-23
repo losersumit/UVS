@@ -136,9 +136,7 @@ const { starsEarned } = await applyRunStats(
 await message.reactions.cache.get("⏳")?.remove();
 await message.react("✅");
 
-// Get server-specific star emojis
-const guildConfig = await getGuildConfig(message.guild.id);
-
+// Use server-specific star emojis (guildConfig already fetched above)
 if (starsEarned >= 1) await message.react(guildConfig.star_1_emoji).catch(() => {});
 if (starsEarned >= 2) await message.react(guildConfig.star_2_emoji).catch(() => {});
 if (starsEarned >= 3) await message.react(guildConfig.star_3_emoji).catch(() => {});
