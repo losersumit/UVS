@@ -40,8 +40,6 @@ async function getOrCreatePlayer(discordId, username, guildId) {
   }
 
   // Existing player — NO GUILD LOCKING
-  // Players can post in ANY approved server
-  // Guild tag remains from first registration - DO NOT UPDATE
   return player;
 }
 
@@ -60,7 +58,7 @@ async function applyRunStats(playerId, ocr, client) {
         player_id: playerId, 
         total_distance_km: 0, 
         total_time_minutes: 0,
-        current_level: 0, // Critical for anticheat
+        current_level: 0,
         last_xp: 0
       })
       .select().single();
@@ -72,7 +70,6 @@ async function applyRunStats(playerId, ocr, client) {
   const check = validateRun(ocr, stats);
 
   if (!check.ok) {
-    // Get player's current guild_id for logging (optional, not for enforcement)
     const { data: player } = await supabase
       .from("players")
       .select("guild_id")
@@ -89,25 +86,34 @@ async function applyRunStats(playerId, ocr, client) {
   }
   // ─────────────────
 
-  const newDistance = (stats.total_distance_km || 0) + Number(ocr.distance_km);
-  const newTime = (stats.total_time_minutes || 0) + Number(ocr.time_minutes);
-  const newAvgSpeed = newTime > 0 ? (newDistance / (newTime / 60)) : 0;
+  // 1. SANITIZE INPUTS (Fixes NaN issues that cause DB inserts to fail)
+  const damagePenalty = Number(ocr.damage_penalty) || 0;
+  const timePenalty = Number(ocr.time_penalty) || 0;
+  const distanceKm = Number(ocr.distance_km) || 0;
+  const timeMinutes = Number(ocr.time_minutes) || 0;
+  const income = Number(ocr.income) || 0;
+
+  const newDistance = (stats.total_distance_km || 0) + distanceKm;
+  const newTime = (stats.total_time_minutes || 0) + timeMinutes;
   
-  const isClean = Number(ocr.damage_penalty) === 0 && Number(ocr.time_penalty) === 0;
+  const isClean = damagePenalty === 0 && timePenalty === 0;
 
   // Calculate Score
-  const runDistance = Number(ocr.distance_km) || 0;
-  const runSpeed = ocr.time_minutes > 0 ? (runDistance / (ocr.time_minutes / 60)) : 0;
+  const runSpeed = timeMinutes > 0 ? (distanceKm / (timeMinutes / 60)) : 0;
   
-  let baseScore = (runDistance * 1.0) + (runSpeed * 5.0);
+  let baseScore = (distanceKm * 1.0) + (runSpeed * 5.0);
   if (isClean) baseScore = baseScore * 1.2;
 
-  const penaltySum = Number(ocr.damage_penalty) + Number(ocr.time_penalty);
-  const income = Number(ocr.income) || 0;
-  const gross = income + penaltySum;
+  const penaltySum = damagePenalty + timePenalty;
+  const gross =pVp08O6i4V7qF78v0wD4XQ income + penaltySum;
   const penaltyPercent = gross > 0 ? (penaltySum / gross) * 100 : 0;
 
-  const finalScore = Math.round(baseScore - (baseScore * penaltyPercent / 100));
+  let finalScore = Math.round(baseScore - (baseScore * penaltyPercent / 100));
+  
+  // Safety: Ensure finalScore is valid number
+  if (isNaN(finalScore) || !isFinite(finalScore)) {
+    finalScore = 0;
+  }
 
   let starsEarned = 0;
   if (finalScore > 1000) starsEarned = 3;
@@ -119,8 +125,8 @@ async function applyRunStats(playerId, ocr, client) {
     total_distance_km: newDistance,
     total_time_minutes: newTime,
     current_level: ocr.level,
-    total_damage_penalty: (stats.total_damage_penalty || 0) + Number(ocr.damage_penalty),
-    total_time_penalty: (stats.total_time_penalty || 0) + Number(ocr.time_penalty),
+    total_damage_penalty: (stats.total_damage_penalty || 0) + damagePenalty,
+    total_time_penalty: (stats.total_time_penalty || 0) + timePenalty,
     total_score: (stats.total_score || 0) + finalScore,
     total_stars: (stats.total_stars || 0) + starsEarned,
     last_level: ocr.level,
@@ -129,8 +135,7 @@ async function applyRunStats(playerId, ocr, client) {
   };
 
   // Only update speed if it's a new personal best
-  if (ocr.time_minutes > 5 && runSpeed > (stats.best_avg_speed_kmph || 0)) {
-     // We use the RUN speed for PB, not the lifetime average
+  if (timeMinutes > 5 && runSpeed > (stats.best_avg_speed_kmph || 0)) {
      update.best_avg_speed_kmph = Number(runSpeed.toFixed(1));
   }
 
@@ -145,13 +150,19 @@ async function applyRunStats(playerId, ocr, client) {
 
   if (updError) throw updError;
 
-  // Log successful run
-  await supabase.from("runs").insert({
+  // 2. INSERT RUN AND CHECK FOR ERROR (Fixes silent failure)
+  const { error: runError } = await supabase.from("runs").insert({
     player_id: playerId,
     image_hash: ocr.image_hash,
     score: finalScore,
     stars: starsEarned
   });
+
+  if (runError) {
+    console.error("❌ FAILED TO SAVE RUN HASH:", runError);
+    // Throw error so the user sees the rejection message in Discord
+    throw new Error(`Database Error: Could not save run. ${runError.message}`);
+  }
 
   return { starsEarned };
 }
