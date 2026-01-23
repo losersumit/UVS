@@ -105,7 +105,7 @@ async function applyRunStats(playerId, ocr, client) {
   if (isClean) baseScore = baseScore * 1.2;
 
   const penaltySum = damagePenalty + timePenalty;
-  const gross =pVp08O6i4V7qF78v0wD4XQ income + penaltySum;
+  const gross = income + penaltySum;
   const penaltyPercent = gross > 0 ? (penaltySum / gross) * 100 : 0;
 
   let finalScore = Math.round(baseScore - (baseScore * penaltyPercent / 100));
