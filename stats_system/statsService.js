@@ -3,14 +3,14 @@ const { supabase } = require("./supabase");
 const { validateRun } = require("../anticheat");
 
 async function getOrCreatePlayer(discordId, username, guildId) {
-  // Check if player already exists
+  // Check if player already exists (GLOBAL - not per-server)
   let { data: player } = await supabase
     .from("players")
     .select("*")
     .eq("discord_id", discordId)
     .single();
 
-  // Get guild tag
+  // Verify server is approved (for display/branding purposes only)
   const { data: guild } = await supabase
     .from("approved_guilds")
     .select("guild_tag")
@@ -26,7 +26,7 @@ async function getOrCreatePlayer(discordId, username, guildId) {
       .insert({
         discord_id: discordId,
         username,
-        guild_id: guildId,
+        guild_id: guildId, // Store for display purposes only, not for locking
         guild_tag: guild.guild_tag
       })
       .select()
@@ -39,11 +39,9 @@ async function getOrCreatePlayer(discordId, username, guildId) {
     return newPlayer;
   }
 
-  // Existing player — VTC LOCK Check
-  if (player.guild_id !== guildId) {
-    throw new Error("❌ You are registered in another VTC. Leave it first.");
-  }
-
+  // Existing player — NO GUILD LOCKING
+  // Players can post in ANY approved server
+  // Guild tag remains from first registration - DO NOT UPDATE
   return player;
 }
 
@@ -74,9 +72,16 @@ async function applyRunStats(playerId, ocr, client) {
   const check = validateRun(ocr, stats);
 
   if (!check.ok) {
+    // Get player's current guild_id for logging (optional, not for enforcement)
+    const { data: player } = await supabase
+      .from("players")
+      .select("guild_id")
+      .eq("id", playerId)
+      .single();
+
     await supabase.from("run_rejections").insert({
       player_id: playerId,
-      guild_id: stats.guild_id || null,
+      guild_id: player?.guild_id || null,
       reason: check.reason,
       image_hash: ocr.image_hash
     });

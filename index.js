@@ -42,6 +42,8 @@ client.once("ready", async () => {
     { name: "stats", description: "Check trucking stats", options: [{ name: "user", description: "View stats of another player", type: 6, required: false }] },
     { name: "speedlb", description: "View top average speeds" },
     { name: "levellb", description: "View highest level truckers" },
+    { name: "worstdrivers", description: "View worst drivers by penalties" },
+    { name: "bestdrivers", description: "View best drivers by clean deliveries" },
     { name: "clearstats", description: "Clear a user's stats (Owner Only)", options: [{ name: "user", description: "User to clear", type: 6, required: true }] }
   ];
 
@@ -86,6 +88,33 @@ client.on("interactionCreate", async (interaction) => {
     const hours = Math.floor((stats.total_time_minutes || 0) / 60);
     const minutes = (stats.total_time_minutes || 0) % 60;
 
+    // Get all player stats in one query to calculate ranks efficiently
+    const { data: allStats } = await supabase
+      .from("player_stats")
+      .select("current_level, total_distance_km, total_time_minutes, best_avg_speed_kmph, total_score, total_stars, clean_deliveries, total_damage_penalty, total_time_penalty");
+
+    // Calculate ranks
+    const userLevel = stats.current_level || 0;
+    const userDistance = stats.total_distance_km || 0;
+    const userTime = stats.total_time_minutes || 0;
+    const userSpeed = stats.best_avg_speed_kmph || 0;
+    const userScore = stats.total_score || 0;
+    const userStars = stats.total_stars || 0;
+    const userClean = stats.clean_deliveries || 0;
+    const userPenalty = (stats.total_damage_penalty || 0) + (stats.total_time_penalty || 0);
+
+    const levelRank = (allStats || []).filter(s => (s.current_level || 0) > userLevel).length + 1;
+    const distanceRank = (allStats || []).filter(s => (s.total_distance_km || 0) > userDistance).length + 1;
+    const timeRank = (allStats || []).filter(s => (s.total_time_minutes || 0) > userTime).length + 1;
+    const speedRank = (allStats || []).filter(s => (s.best_avg_speed_kmph || 0) > userSpeed).length + 1;
+    const scoreRank = (allStats || []).filter(s => (s.total_score || 0) > userScore).length + 1;
+    const starsRank = (allStats || []).filter(s => (s.total_stars || 0) > userStars).length + 1;
+    const cleanRank = (allStats || []).filter(s => (s.clean_deliveries || 0) > userClean).length + 1;
+    const penaltyRank = (allStats || []).filter(s => {
+      const penalty = (s.total_damage_penalty || 0) + (s.total_time_penalty || 0);
+      return penalty < userPenalty;
+    }).length + 1;
+
     // Get server-specific branding
     const guildConfig = await getGuildConfig(interaction.guild.id);
 
@@ -94,14 +123,14 @@ client.on("interactionCreate", async (interaction) => {
       color: guildConfig.embed_color,
       thumbnail: guildConfig.thumbnail ? { url: guildConfig.thumbnail } : undefined,
       fields: [
-        { name: "Level", value: `${stats.current_level || 0}`, inline: true },
-        { name: "Total Distance", value: `${Math.round(stats.total_distance_km || 0)} km`, inline: true },
-        { name: "Driving Time", value: `${hours}h ${minutes}m`, inline: true },
-        { name: "Best Avg Speed", value: `${stats.best_avg_speed_kmph || 0} km/h`, inline: true },
-        { name: "Total Score", value: `${Math.round(stats.total_score || 0)}`, inline: true },
-        { name: "Total Stars", value: `⭐ ${stats.total_stars || 0}`, inline: true },
-        { name: "Clean Deliveries", value: `${stats.clean_deliveries || 0}`, inline: true },
-        { name: "Penalties", value: `Dm: ${stats.total_damage_penalty} | Tm: ${stats.total_time_penalty}`, inline: true }
+        { name: "Level", value: `${stats.current_level || 0} (Rank #${levelRank})`, inline: true },
+        { name: "Total Distance", value: `${Math.round(stats.total_distance_km || 0)} km (Rank #${distanceRank})`, inline: true },
+        { name: "Driving Time", value: `${hours}h ${minutes}m (Rank #${timeRank})`, inline: true },
+        { name: "Best Avg Speed", value: `${stats.best_avg_speed_kmph || 0} km/h (Rank #${speedRank})`, inline: true },
+        { name: "Total Score", value: `${Math.round(stats.total_score || 0)} (Rank #${scoreRank})`, inline: true },
+        { name: "Total Stars", value: `⭐ ${stats.total_stars || 0} (Rank #${starsRank})`, inline: true },
+        { name: "Clean Deliveries", value: `${stats.clean_deliveries || 0} (Rank #${cleanRank})`, inline: true },
+        { name: "Penalties", value: `Dm: ${stats.total_damage_penalty} | Tm: ${stats.total_time_penalty} (Rank #${penaltyRank})`, inline: true }
       ]
     };
     await interaction.editReply({ embeds: [embed] });
@@ -112,17 +141,18 @@ client.on("interactionCreate", async (interaction) => {
     await interaction.deferReply();
     const { data: levelStats } = await supabase
       .from("player_stats")
-      .select("current_level, players!inner(username, discord_id)")
+      .select("current_level, players!inner(username, discord_id, guild_tag)")
       .gt("current_level", 0)
       .order("current_level", { ascending: false })
-      .limit(10);
+      .limit(5);
 
     if (!levelStats?.length) return interaction.editReply("❌ No records yet.");
 
     const fields = await Promise.all(levelStats.map(async (row, i) => {
       const member = await interaction.guild.members.fetch(row.players.discord_id).catch(() => null);
+      const tag = row.players?.guild_tag || "";
       return {
-        name: `#${i + 1} ${member?.displayName || row.players.username}`,
+        name: `#${i + 1} ${tag} ${member?.displayName || row.players.username}`.trim(),
         value: `🏅 Level ${row.current_level}`,
         inline: false
       };
@@ -144,17 +174,18 @@ client.on("interactionCreate", async (interaction) => {
     await interaction.deferReply();
     const { data: speedStats } = await supabase
       .from("player_stats")
-      .select("best_avg_speed_kmph, players!inner(username, discord_id)")
+      .select("best_avg_speed_kmph, players!inner(username, discord_id, guild_tag)")
       .gt("best_avg_speed_kmph", 0)
       .order("best_avg_speed_kmph", { ascending: false })
-      .limit(10);
+      .limit(5);
 
     if (!speedStats?.length) return interaction.editReply("❌ No records yet.");
 
     const fields = await Promise.all(speedStats.map(async (row, i) => {
       const member = await interaction.guild.members.fetch(row.players.discord_id).catch(() => null);
+      const tag = row.players?.guild_tag || "";
       return {
-        name: `#${i + 1} ${member?.displayName || row.players.username}`,
+        name: `#${i + 1} ${tag} ${member?.displayName || row.players.username}`.trim(),
         value: `💨 ${row.best_avg_speed_kmph} km/h`,
         inline: false
       };
@@ -168,6 +199,100 @@ client.on("interactionCreate", async (interaction) => {
         thumbnail: guildConfig.thumbnail ? { url: guildConfig.thumbnail } : undefined,
         fields 
       }] 
+    });
+  }
+
+  // COMMAND: WORST DRIVERS
+  if (interaction.commandName === "worstdrivers") {
+    await interaction.deferReply();
+    
+    // Get all players with penalties
+    const { data: allStats } = await supabase
+      .from("player_stats")
+      .select("total_damage_penalty, total_time_penalty, players!inner(username, discord_id, guild_tag)");
+
+    if (!allStats?.length) return interaction.editReply("❌ No records yet.");
+
+    // Calculate combined penalties and sort
+    const withPenalties = allStats
+      .map(stat => ({
+        ...stat,
+        combinedPenalty: (stat.total_damage_penalty || 0) + (stat.total_time_penalty || 0)
+      }))
+      .filter(s => s.combinedPenalty > 0)
+      .sort((a, b) => b.combinedPenalty - a.combinedPenalty)
+      .slice(0, 3);
+
+    if (!withPenalties.length) return interaction.editReply("❌ No drivers with penalties yet.");
+
+    const fields = await Promise.all(withPenalties.map(async (row, i) => {
+      const member = await interaction.guild.members.fetch(row.players.discord_id).catch(() => null);
+      const tag = row.players?.guild_tag || "";
+      return {
+        name: `#${i + 1} ${tag} ${member?.displayName || row.players.username}`.trim(),
+        value: `Penalty: **${Math.round(row.combinedPenalty)}**\n` +
+               `Damage: ${row.total_damage_penalty || 0} | Time: ${row.total_time_penalty || 0}`,
+        inline: false
+      };
+    }));
+
+    const guildConfig = await getGuildConfig(interaction.guild.id);
+    await interaction.editReply({
+      embeds: [{
+        title: "🚨 Worst Drivers Leaderboard",
+        description: "Ranked by **Combined Penalties** (Damage + Time)",
+        color: guildConfig.embed_color,
+        thumbnail: guildConfig.thumbnail ? { url: guildConfig.thumbnail } : undefined,
+        fields
+      }]
+    });
+  }
+
+  // COMMAND: BEST DRIVERS
+  if (interaction.commandName === "bestdrivers") {
+    await interaction.deferReply();
+    
+    // Get all players, sort by clean_deliveries DESC, then total_score DESC
+    const { data: bestStats } = await supabase
+      .from("player_stats")
+      .select("clean_deliveries, total_score, players!inner(username, discord_id, guild_tag)")
+      .gt("clean_deliveries", 0)
+      .order("clean_deliveries", { ascending: false })
+      .order("total_score", { ascending: false })
+      .limit(100); // Get more to sort properly
+
+    if (!bestStats?.length) return interaction.editReply("❌ No records yet.");
+
+    // Sort by clean_deliveries DESC, then total_score DESC, take TOP 3
+    const sorted = bestStats
+      .sort((a, b) => {
+        if (b.clean_deliveries !== a.clean_deliveries) {
+          return b.clean_deliveries - a.clean_deliveries;
+        }
+        return (b.total_score || 0) - (a.total_score || 0);
+      })
+      .slice(0, 3);
+
+    const fields = await Promise.all(sorted.map(async (row, i) => {
+      const member = await interaction.guild.members.fetch(row.players.discord_id).catch(() => null);
+      const tag = row.players?.guild_tag || "";
+      return {
+        name: `#${i + 1} ${tag} ${member?.displayName || row.players.username}`.trim(),
+        value: `Clean Deliveries: **${row.clean_deliveries || 0}**\n` +
+               `Total Score: **${Math.round(row.total_score || 0)}**`,
+        inline: false
+      };
+    }));
+
+    const guildConfig = await getGuildConfig(interaction.guild.id);
+    await interaction.editReply({
+      embeds: [{
+        title: "⭐ Best Drivers Leaderboard",
+        description: "Ranked by **Clean Deliveries** (tie-breaker: Total Score)",
+        color: guildConfig.embed_color,
+        thumbnail: guildConfig.thumbnail ? { url: guildConfig.thumbnail } : undefined,
+        fields
+      }]
     });
   }
 

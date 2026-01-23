@@ -27,26 +27,15 @@ function registerLeaderboardRealtime(client) {
             payload.new.player_id
           );
 
-          // Get the guild_id from the player
-          const { data: player } = await supabase
-            .from("players")
-            .select("guild_id")
-            .eq("id", payload.new.player_id)
-            .single();
-
-          if (player && player.guild_id) {
-            await updateLeaderboard(client, player.guild_id);
-          } else {
-            // Fallback: update all guilds (if player not found or no guild_id)
-            // This is less efficient but ensures leaderboards stay updated
-            const { data: allGuilds } = await supabase
-              .from("approved_guilds")
-              .select("guild_id");
-            
-            if (allGuilds) {
-              for (const guild of allGuilds) {
-                await updateLeaderboard(client, guild.guild_id).catch(console.error);
-              }
+          // GLOBAL system: Update leaderboards in ALL approved guilds
+          // When any player's stats change, all servers' leaderboards must update
+          const { data: allGuilds } = await supabase
+            .from("approved_guilds")
+            .select("guild_id");
+          
+          if (allGuilds) {
+            for (const guild of allGuilds) {
+              await updateLeaderboard(client, guild.guild_id).catch(console.error);
             }
           }
         } catch (err) {
