@@ -1,86 +1,241 @@
 // stats_system/leaderboardService.js
-// [MIGRATION MODE] Syncs existing message IDs to DB only.
-
 const { supabase } = require("./supabase");
+const { getGuildConfig } = require("./guildConfig");
 
-async function syncLeaderboardIds(client, guildId) {
+function formatMinutes(minutes) {
+  const h = Math.floor(minutes / 60);
+  const m = Math.floor(minutes % 60);
+  return `${h}h ${m}m`;
+}
+
+/**
+ * Helper to fetch a list of fields with server nicknames
+ */
+async function getLeaderboardFields(data, guild, valueFormatter) {
+  return await Promise.all(
+    data.map(async (row, i) => {
+      let displayName = row.players?.username || "Unknown";
+
+      if (row.players?.discord_id) {
+        try {
+          const member = await guild.members
+            .fetch(row.players.discord_id)
+            .catch(() => null);
+          if (member) displayName = member.displayName;
+        } catch {}
+      }
+
+      const tag = row.players?.guild_tag || "";
+      const name = `#${i + 1} ${tag} ${displayName}`.trim();
+
+      return {
+        name,
+        value: valueFormatter(row),
+        inline: false
+      };
+    })
+  );
+}
+
+/**
+ * Core Logic: Edit existing message (from DB) or Send New & Save to DB
+ */
+async function sendOrUpdate(guildId, channel, dbColumn, currentId, embed) {
+  // 1. Try to Edit if we have an ID
+  if (currentId) {
+    try {
+      const msg = await channel.messages.fetch(currentId);
+      await msg.edit({ embeds: [embed] });
+      return currentId; // Success, ID didn't change
+    } catch (err) {
+      console.warn(`[Leaderboard] Message ${currentId} not found/deleted. Sending new...`);
+      // Fail silently and proceed to send new one
+    }
+  }
+
+  // 2. Send New Message
   try {
-    console.log(`[MIGRATION] Starting sync for Guild ID: ${guildId}`);
+    const newMsg = await channel.send({ embeds: [embed] });
 
-    // 1. Get Guild Config from DB
-    const { data: guildRow, error } = await supabase
+    // 3. Save new ID to Database immediately
+    await supabase
       .from("approved_guilds")
-      .select("*")
-      .eq("guild_id", guildId)
-      .single();
+      .update({ [dbColumn]: newMsg.id })
+      .eq("guild_id", guildId);
 
-    if (error || !guildRow) {
-      console.log(`[MIGRATION] ❌ Guild ${guildId} not found in DB.`);
-      return;
-    }
-
-    if (!guildRow.leaderboard_channel_id) {
-      console.log(`[MIGRATION] ⚠️ No leaderboard channel set for ${guildRow.guild_tag}`);
-      return;
-    }
-
-    // 2. Fetch Channel
-    const channel = await client.channels.fetch(guildRow.leaderboard_channel_id).catch(() => null);
-    if (!channel) {
-      console.error(`[MIGRATION] ❌ Channel ${guildRow.leaderboard_channel_id} not found.`);
-      return;
-    }
-
-    // 3. Fetch Last 4 Messages ONLY
-    const messages = await channel.messages.fetch({ limit: 4 });
-    console.log(`[MIGRATION] Scanned ${messages.size} messages in ${channel.name}`);
-
-    // 4. Identify IDs
-    const updates = {};
-    let foundCount = 0;
-
-    messages.forEach((msg) => {
-      // Must be from this bot and have an embed
-      if (msg.author.id !== client.user.id || msg.embeds.length === 0) return;
-
-      const title = msg.embeds[0].title;
-
-      if (title === "🏆 Distance Leaderboard") {
-        updates.lb_msg_distance = msg.id;
-        foundCount++;
-      } else if (title === "⏱️ Driving Time Leaderboard") {
-        updates.lb_msg_time = msg.id;
-        foundCount++;
-      } else if (title === "⭐ Career Score Leaderboard") {
-        updates.lb_msg_score = msg.id;
-        foundCount++;
-      } else if (title === "🏆 Top Guilds Leaderboard") {
-        updates.lb_msg_guilds = msg.id;
-        foundCount++;
-      }
-    });
-
-    // 5. Update Database
-    if (foundCount > 0) {
-      const { error: updateError } = await supabase
-        .from("approved_guilds")
-        .update(updates)
-        .eq("guild_id", guildId);
-
-      if (updateError) {
-        console.error(`[MIGRATION] ❌ DB Update Failed:`, updateError);
-      } else {
-        console.log(`[MIGRATION] ✅ Success! Synced ${foundCount} IDs for ${guildRow.guild_tag}`);
-      }
-    } else {
-      console.log(`[MIGRATION] ⚠️ No leaderboard messages found in the last 4 messages.`);
-    }
-
+    return newMsg.id;
   } catch (err) {
-    console.error(`[MIGRATION] ❌ Critical Error for ${guildId}:`, err);
+    console.error(`[Leaderboard] Failed to send/save ${dbColumn}:`, err.message);
+    return null;
   }
 }
 
-// Export as updateLeaderboard so realtime listener doesn't crash, 
-// even though we are using it for sync.
-module.exports = { updateLeaderboard: syncLeaderboardIds };
+async function updateLeaderboard(client, guildId) {
+  try {
+    // 1. Get Config (colors, branding, channel ID)
+    const guildConfig = await getGuildConfig(guildId);
+    
+    if (!guildConfig.leaderboard_channel_id) return;
+    
+    // 2. Get Message IDs directly from DB (ensures persistence across restarts)
+    const { data: guildRow, error } = await supabase
+      .from("approved_guilds")
+      .select("lb_msg_distance, lb_msg_time, lb_msg_score, lb_msg_guilds")
+      .eq("guild_id", guildId)
+      .single();
+
+    if (error || !guildRow) return;
+
+    const channel = await client.channels.fetch(guildConfig.leaderboard_channel_id).catch(() => null);
+    if (!channel) {
+      console.error(`Leaderboard channel not found for guild ${guildId}`);
+      return;
+    }
+    
+    const guild = channel.guild;
+
+    // ───────────── Distance Leaderboard ─────────────
+    const { data: topDistance } = await supabase
+      .from("player_stats")
+      .select("total_distance_km, players!inner(username, discord_id, guild_tag, guild_id)")
+      .order("total_distance_km", { ascending: false })
+      .limit(5);
+
+    const distanceFields = await getLeaderboardFields(
+      topDistance || [], 
+      guild, 
+      (row) => `${Math.round(row.total_distance_km)} km`
+    );
+
+    const distanceEmbed = {
+      title: "🏆 Distance Leaderboard",
+      color: guildConfig.embed_color,
+      thumbnail: guildConfig.thumbnail ? { url: guildConfig.thumbnail } : undefined,
+      fields: distanceFields
+    };
+
+    await sendOrUpdate(guildId, channel, "lb_msg_distance", guildRow.lb_msg_distance, distanceEmbed);
+
+    // ───────────── Time Leaderboard ─────────────
+    const { data: topTime } = await supabase
+      .from("player_stats")
+      .select("total_time_minutes, players!inner(username, discord_id, guild_tag, guild_id)")
+      .order("total_time_minutes", { ascending: false })
+      .limit(5);
+
+    const timeFields = await getLeaderboardFields(
+      topTime || [], 
+      guild, 
+      (row) => formatMinutes(row.total_time_minutes)
+    );
+
+    const timeEmbed = {
+      title: "⏱️ Driving Time Leaderboard",
+      color: guildConfig.embed_color,
+      thumbnail: guildConfig.thumbnail ? { url: guildConfig.thumbnail } : undefined,
+      fields: timeFields
+    };
+
+    await sendOrUpdate(guildId, channel, "lb_msg_time", guildRow.lb_msg_time, timeEmbed);
+
+    // ───────────── Score Leaderboard ─────────────
+    const { data: topScore } = await supabase
+      .from("player_stats")
+      .select("total_score, total_stars, players!inner(username, discord_id, guild_tag, guild_id)")
+      .order("total_score", { ascending: false })
+      .limit(5);
+
+    const scoreFields = await getLeaderboardFields(
+      topScore || [], 
+      guild, 
+      (row) => `Score: **${Math.round(row.total_score)}**\nStars: **${row.total_stars}**`
+    );
+
+    const scoreEmbed = {
+      title: "⭐ Career Score Leaderboard",
+      description: "Ranked by **Total Score**",
+      color: guildConfig.embed_color,
+      thumbnail: guildConfig.thumbnail ? { url: guildConfig.thumbnail } : undefined,
+      fields: scoreFields,
+      footer: {
+        text: `Last updated • ${new Date().toLocaleString()}`
+      }
+    };
+
+    await sendOrUpdate(guildId, channel, "lb_msg_score", guildRow.lb_msg_score, scoreEmbed);
+
+    // ───────────── Top Guilds Leaderboard ─────────────
+    const { data: guildStats } = await supabase
+      .from("player_stats")
+      .select(`
+        total_score,
+        total_time_minutes,
+        total_stars,
+        total_distance_km,
+        players!inner(guild_id, guild_tag)
+      `);
+
+    if (guildStats && guildStats.length > 0) {
+      const guildAggregates = new Map();
+      
+      for (const stat of guildStats) {
+        const gid = stat.players?.guild_id;
+        if (!gid) continue;
+        
+        if (!guildAggregates.has(gid)) {
+          guildAggregates.set(gid, {
+            guild_id: gid,
+            guild_tag: stat.players?.guild_tag || "",
+            total_score: 0,
+            total_time_minutes: 0,
+            total_stars: 0,
+            total_distance_km: 0
+          });
+        }
+        
+        const agg = guildAggregates.get(gid);
+        agg.total_score += Number(stat.total_score || 0);
+        agg.total_time_minutes += Number(stat.total_time_minutes || 0);
+        agg.total_stars += Number(stat.total_stars || 0);
+        agg.total_distance_km += Number(stat.total_distance_km || 0);
+      }
+      
+      const topGuilds = Array.from(guildAggregates.values())
+        .sort((a, b) => b.total_score - a.total_score)
+        .slice(0, 3);
+      
+      if (topGuilds.length > 0) {
+        const guildFields = topGuilds.map((g, i) => {
+          const hours = Math.floor(g.total_time_minutes / 60);
+          const minutes = g.total_time_minutes % 60;
+          return {
+            name: `#${i + 1} ${g.guild_tag || "Unknown Guild"}`,
+            value: `Score: **${Math.round(g.total_score)}**\n` +
+                   `Time: ${hours}h ${minutes}m\n` +
+                   `Stars: **${g.total_stars}**\n` +
+                   `Distance: ${Math.round(g.total_distance_km)} km`,
+            inline: false
+          };
+        });
+        
+        const guildEmbed = {
+          title: "🏆 Top Guilds Leaderboard",
+          description: "Ranked by **Total Score** (sum of all members)",
+          color: guildConfig.embed_color,
+          thumbnail: guildConfig.thumbnail ? { url: guildConfig.thumbnail } : undefined,
+          fields: guildFields,
+          footer: {
+            text: `Last updated • ${new Date().toLocaleString()}`
+          }
+        };
+        
+        await sendOrUpdate(guildId, channel, "lb_msg_guilds", guildRow.lb_msg_guilds, guildEmbed);
+      }
+    }
+
+  } catch (err) {
+    console.error("Leaderboard update failed:", err);
+  }
+}
+
+module.exports = { updateLeaderboard };
