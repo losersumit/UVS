@@ -20,6 +20,8 @@ const { isOwner } = require("./owner");
 const { isGuildApproved } = require("./guildGuard");
 const { getGuildConfig } = require("./stats_system/guildConfig");
 
+const { updateLeaderboard } = require("./stats_system/leaderboardService"); // This now imports the sync function
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -35,7 +37,23 @@ client.once("ready", async () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
 
   // Register Realtime Listener
+
   registerLeaderboardRealtime(client);
+
+  // 2. [MIGRATION TRIGGER] Run Sync for ALL guilds on startup
+  console.log("🚀 STARTING LEADERBOARD ID MIGRATION...");
+  
+  const { data: allGuilds } = await supabase
+    .from("approved_guilds")
+    .select("guild_id");
+
+  if (allGuilds) {
+    for (const guild of allGuilds) {
+      // Run sequentially to be safe
+      await updateLeaderboard(client, guild.guild_id);
+    }
+  }
+  console.log("🏁 MIGRATION CHECK COMPLETE.");
 
   // Register Commands
   const commands = [
@@ -228,7 +246,7 @@ client.on("interactionCreate", async (interaction) => {
     // We try to use the DB name. If empty, we try to fetch the name from Discord cache.
     const guildList = (guildsData || []).map(g => {
         const name = g.guild_name || interaction.client.guilds.cache.get(g.guild_id)?.name || "Unknown Server";
-        return `**[${g.guild_tag}]** ${name}`;
+        return `**${g.guild_tag}** ${name}`;
     }).join("\n");
 
     const helpEmbed = {
