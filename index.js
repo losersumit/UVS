@@ -20,8 +20,6 @@ const { isOwner } = require("./owner");
 const { isGuildApproved } = require("./guildGuard");
 const { getGuildConfig } = require("./stats_system/guildConfig");
 
-const { updateLeaderboard } = require("./stats_system/leaderboardService"); // This now imports the sync function
-
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -37,23 +35,7 @@ client.once("ready", async () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
 
   // Register Realtime Listener
-
   registerLeaderboardRealtime(client);
-
-  // 2. [MIGRATION TRIGGER] Run Sync for ALL guilds on startup
-  console.log("🚀 STARTING LEADERBOARD ID MIGRATION...");
-  
-  const { data: allGuilds } = await supabase
-    .from("approved_guilds")
-    .select("guild_id");
-
-  if (allGuilds) {
-    for (const guild of allGuilds) {
-      // Run sequentially to be safe
-      await updateLeaderboard(client, guild.guild_id);
-    }
-  }
-  console.log("🏁 MIGRATION CHECK COMPLETE.");
 
   // Register Commands
   const commands = [
