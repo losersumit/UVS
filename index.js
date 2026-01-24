@@ -44,7 +44,8 @@ client.once("ready", async () => {
     { name: "levellb", description: "View highest level truckers" },
     { name: "worstdrivers", description: "View worst drivers by penalties" },
     { name: "bestdrivers", description: "View best drivers by clean deliveries" },
-    { name: "clearstats", description: "Clear a user's stats (Owner Only)", options: [{ name: "user", description: "User to clear", type: 6, required: true }] }
+    { name: "clearstats", description: "Clear a user's stats (Owner Only)", options: [{ name: "user", description: "User to clear", type: 6, required: true }] },
+    { name: "help", description: "Show bot instructions and commands" }
   ];
 
   await client.application.commands.set(commands);
@@ -200,6 +201,58 @@ client.on("interactionCreate", async (interaction) => {
         fields 
       }] 
     });
+  }
+
+// COMMAND: HELP
+  if (interaction.commandName === "help") {
+    await interaction.deferReply();
+    const guildConfig = await getGuildConfig(interaction.guild.id);
+
+    // 1. Fetch channel mentions for dynamic description
+    const screenshotChannel = guildConfig.screenshot_channel_id 
+      ? `<#${guildConfig.screenshot_channel_id}>` 
+      : "the designated channel";
+      
+    const leaderboardChannel = guildConfig.leaderboard_channel_id 
+      ? `<#${guildConfig.leaderboard_channel_id}>` 
+      : "the server leaderboards";
+
+    // 2. Fetch Approved Guilds List from Database
+    // Select guild_id, tag, and name as requested
+    const { data: guildsData } = await supabase
+      .from("approved_guilds")
+      .select("guild_id, guild_tag, guild_name") 
+      .order("guild_tag", { ascending: true });
+
+    // 3. Format the list: "[TAG] Name"
+    // We try to use the DB name. If empty, we try to fetch the name from Discord cache.
+    const guildList = (guildsData || []).map(g => {
+        const name = g.guild_name || interaction.client.guilds.cache.get(g.guild_id)?.name || "Unknown Server";
+        return `**[${g.guild_tag}]** ${name}`;
+    }).join("\n");
+
+    const helpEmbed = {
+      title: "🚛 UVS Bot Help & Commands",
+      description: `I am a career tracking bot for **Truckers of Europe 3**! \n\n**How it works:**\n1. Upload your **'Job Finished'** screenshot to ${screenshotChannel}.\n2. I will automatically scan the image (OCR), verify the data, and update your career stats.\n3. Compete with others on ${leaderboardChannel}!`,
+      color: guildConfig.embed_color,
+      thumbnail: guildConfig.thumbnail ? { url: guildConfig.thumbnail } : undefined,
+      fields: [
+        { name: "📊 /stats [user]", value: "View your personal career stats or check another driver's profile.", inline: false },
+        { name: "🏁 /speedlb", value: "View the leaderboard for Top Average Speeds.", inline: true },
+        { name: "📈 /levellb", value: "See who has the highest Career Level.", inline: true },
+        { name: "⭐ /bestdrivers", value: "Ranking based on Clean Deliveries (no damage/fines).", inline: true },
+        { name: "🚨 /worstdrivers", value: "Ranking by total penalties accumulated.", inline: true },
+        { name: "🛠️ /clearstats", value: "**(Owner Only)** Reset a user's stats completely.", inline: true },
+        // 👇 The new field listing all approved guilds inside the embed 👇
+        { name: "✅ Approved VTCs", value: guildList || "No VTCs found.", inline: false },
+        { name: "ℹ️ /help", value: "Show this information menu.", inline: true }
+      ],
+      footer: {
+        text: "Operated by NMC"
+      }
+    };
+
+    await interaction.editReply({ embeds: [helpEmbed] });
   }
 
   // COMMAND: WORST DRIVERS
