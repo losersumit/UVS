@@ -33,7 +33,7 @@ async function getOrCreatePlayer(discordId, username, guildId) {
       .single();
 
     if (error) throw error;
-    
+
     // Create initial stats row
     await supabase.from("player_stats").insert({ player_id: newPlayer.id });
     return newPlayer;
@@ -54,9 +54,9 @@ async function applyRunStats(playerId, ocr, client) {
   if (fetchError || !stats) {
     const { data: newStats, error: insError } = await supabase
       .from("player_stats")
-      .insert({ 
-        player_id: playerId, 
-        total_distance_km: 0, 
+      .insert({
+        player_id: playerId,
+        total_distance_km: 0,
         total_time_minutes: 0,
         current_level: 0,
         last_xp: 0
@@ -95,12 +95,12 @@ async function applyRunStats(playerId, ocr, client) {
 
   const newDistance = (stats.total_distance_km || 0) + distanceKm;
   const newTime = (stats.total_time_minutes || 0) + timeMinutes;
-  
+
   const isClean = damagePenalty === 0 && timePenalty === 0;
 
   // Calculate Score
   const runSpeed = timeMinutes > 0 ? (distanceKm / (timeMinutes / 60)) : 0;
-  
+
   let baseScore = (distanceKm * 1.0) + (runSpeed * 5.0);
   if (isClean) baseScore = baseScore * 1.2;
 
@@ -109,7 +109,7 @@ async function applyRunStats(playerId, ocr, client) {
   const penaltyPercent = gross > 0 ? (penaltySum / gross) * 100 : 0;
 
   let finalScore = Math.round(baseScore - (baseScore * penaltyPercent / 100));
-  
+
   // Safety: Ensure finalScore is valid number
   if (isNaN(finalScore) || !isFinite(finalScore)) {
     finalScore = 0;
@@ -136,7 +136,7 @@ async function applyRunStats(playerId, ocr, client) {
 
   // Only update speed if it's a new personal best
   if (timeMinutes > 5 && runSpeed > (stats.best_avg_speed_kmph || 0)) {
-     update.best_avg_speed_kmph = Number(runSpeed.toFixed(1));
+    update.best_avg_speed_kmph = Number(runSpeed.toFixed(1));
   }
 
   if (isClean) {
@@ -155,7 +155,10 @@ async function applyRunStats(playerId, ocr, client) {
     player_id: playerId,
     image_hash: ocr.image_hash,
     score: finalScore,
-    stars: starsEarned
+    stars: starsEarned,
+    income: income,
+    distance: distanceKm,
+    time_taken: timeMinutes
   });
 
   if (runError) {
