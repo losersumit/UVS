@@ -4,6 +4,7 @@ const LIMITS = {
   MAX_AVG_SPEED: 180,          // km/h (Loose cap to allow for downhill/bugs)
   MAX_DISTANCE_PER_RUN: 620,  // km
   MAX_INCOME_PER_RUN: 45000,  // game currency per run
+  MAX_INCOME_PER_KM: 120,     // game currency per km
 };
 
 function reject(reason) {
@@ -41,6 +42,12 @@ function validateRun(ocr, prevStats) {
   // Income Check
   if (income > LIMITS.MAX_INCOME_PER_RUN) {
     return reject(`Income ${income} exceeds limit of ${LIMITS.MAX_INCOME_PER_RUN} per run`);
+  }
+
+  // Income Check (Per Km)
+  const incomePerKm = income / distance;
+  if (incomePerKm > LIMITS.MAX_INCOME_PER_KM) {
+    return reject(`Income per km ${incomePerKm.toFixed(0)} exceeds limit of ${LIMITS.MAX_INCOME_PER_KM}`);
   }
 
   // Progression Check (Anti-Reverse)
