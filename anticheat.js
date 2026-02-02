@@ -47,7 +47,7 @@ function validateRun(ocr, prevStats) {
   // Income Check (Per Km)
   const incomePerKm = income / distance;
   if (incomePerKm > LIMITS.MAX_INCOME_PER_KM) {
-    return reject(`Income per km ${incomePerKm.toFixed(0)} exceeds limit of ${LIMITS.MAX_INCOME_PER_KM}`);
+    return reject(`Income per km ${incomePerKm.toFixed(0)} exceeds limit of ${LIMITS.MAX_INCOME_PER_KM} . If you think this is a bug, please direct message to @losersumit on discord or join the server from bot's Bio.`);
   }
 
   // Progression Check (Anti-Reverse)
