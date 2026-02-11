@@ -31,7 +31,7 @@ const client = new Client({
 // Register Modules
 registerScreenshotListener(client);
 
-client.once("ready", async () => { 
+client.once("ready", async () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
 
   // Register Realtime Listener
@@ -40,10 +40,10 @@ client.once("ready", async () => {
   // Register Commands
   const commands = [
     { name: "stats", description: "Check trucking stats", options: [{ name: "user", description: "View stats of another player", type: 6, required: false }] },
-    { name: "speedlb", description: "View top average speeds" },
-    { name: "levellb", description: "View highest level truckers" },
-    { name: "worstdrivers", description: "View worst drivers by penalties" },
-    { name: "bestdrivers", description: "View best drivers by clean deliveries" },
+    { name: "speedlb", description: "View top average speeds", options: [{ name: "in_current_guild", description: "Show only members of this server", type: 5, required: false }] },
+    { name: "levellb", description: "View highest level truckers", options: [{ name: "in_current_guild", description: "Show only members of this server", type: 5, required: false }] },
+    { name: "worstdrivers", description: "View worst drivers by penalties", options: [{ name: "in_current_guild", description: "Show only members of this server", type: 5, required: false }] },
+    { name: "bestdrivers", description: "View best drivers by clean deliveries", options: [{ name: "in_current_guild", description: "Show only members of this server", type: 5, required: false }] },
     { name: "clearstats", description: "Clear a user's stats (Owner Only)", options: [{ name: "user", description: "User to clear", type: 6, required: true }] },
     { name: "help", description: "Show bot instructions and commands" }
   ];
@@ -73,12 +73,12 @@ client.on("interactionCreate", async (interaction) => {
   if (interaction.commandName === "stats") {
     await interaction.deferReply();
     const targetUser = interaction.options.getUser("user") || interaction.user;
-    
+
     const { data: stats, error } = await supabase
       .from("player_stats")
       .select("*, players!inner(username, discord_id, guild_tag)")
       .eq("players.discord_id", targetUser.id)
-      .maybeSingle(); 
+      .maybeSingle();
 
     if (error || !stats) {
       return interaction.editReply("❌ No stats found for this user.");
@@ -140,12 +140,20 @@ client.on("interactionCreate", async (interaction) => {
   // COMMAND: LEVEL LB
   if (interaction.commandName === "levellb") {
     await interaction.deferReply();
-    const { data: levelStats } = await supabase
+    const inGuild = interaction.options.getBoolean("in_current_guild");
+
+    let query = supabase
       .from("player_stats")
-      .select("current_level, players!inner(username, discord_id, guild_tag)")
+      .select("current_level, players!inner(username, discord_id, guild_tag, guild_id)")
       .gt("current_level", 0)
       .order("current_level", { ascending: false })
       .limit(5);
+
+    if (inGuild) {
+      query = query.eq("players.guild_id", interaction.guild.id);
+    }
+
+    const { data: levelStats } = await query;
 
     if (!levelStats?.length) return interaction.editReply("❌ No records yet.");
 
@@ -160,25 +168,33 @@ client.on("interactionCreate", async (interaction) => {
     }));
 
     const guildConfig = await getGuildConfig(interaction.guild.id);
-    await interaction.editReply({ 
-      embeds: [{ 
-        title: "📈 Level Leaderboard", 
+    await interaction.editReply({
+      embeds: [{
+        title: inGuild ? `📈 Level Leaderboard (${interaction.guild.name})` : "📈 Global Level Leaderboard",
         color: guildConfig.embed_color,
         thumbnail: guildConfig.thumbnail ? { url: guildConfig.thumbnail } : undefined,
-        fields 
-      }] 
+        fields
+      }]
     });
   }
 
   // COMMAND: SPEED LB
   if (interaction.commandName === "speedlb") {
     await interaction.deferReply();
-    const { data: speedStats } = await supabase
+    const inGuild = interaction.options.getBoolean("in_current_guild");
+
+    let query = supabase
       .from("player_stats")
-      .select("best_avg_speed_kmph, players!inner(username, discord_id, guild_tag)")
+      .select("best_avg_speed_kmph, players!inner(username, discord_id, guild_tag, guild_id)")
       .gt("best_avg_speed_kmph", 0)
       .order("best_avg_speed_kmph", { ascending: false })
       .limit(5);
+
+    if (inGuild) {
+      query = query.eq("players.guild_id", interaction.guild.id);
+    }
+
+    const { data: speedStats } = await query;
 
     if (!speedStats?.length) return interaction.editReply("❌ No records yet.");
 
@@ -193,42 +209,42 @@ client.on("interactionCreate", async (interaction) => {
     }));
 
     const guildConfig = await getGuildConfig(interaction.guild.id);
-    await interaction.editReply({ 
-      embeds: [{ 
-        title: "🏁 Speed Leaderboard", 
+    await interaction.editReply({
+      embeds: [{
+        title: inGuild ? `🏁 Speed Leaderboard (${interaction.guild.name})` : "🏁 Global Speed Leaderboard",
         color: guildConfig.embed_color,
         thumbnail: guildConfig.thumbnail ? { url: guildConfig.thumbnail } : undefined,
-        fields 
-      }] 
+        fields
+      }]
     });
   }
 
-// COMMAND: HELP
+  // COMMAND: HELP
   if (interaction.commandName === "help") {
     await interaction.deferReply();
     const guildConfig = await getGuildConfig(interaction.guild.id);
 
     // 1. Fetch channel mentions for dynamic description
-    const screenshotChannel = guildConfig.screenshot_channel_id 
-      ? `<#${guildConfig.screenshot_channel_id}>` 
+    const screenshotChannel = guildConfig.screenshot_channel_id
+      ? `<#${guildConfig.screenshot_channel_id}>`
       : "the designated channel";
-      
-    const leaderboardChannel = guildConfig.leaderboard_channel_id 
-      ? `<#${guildConfig.leaderboard_channel_id}>` 
+
+    const leaderboardChannel = guildConfig.leaderboard_channel_id
+      ? `<#${guildConfig.leaderboard_channel_id}>`
       : "the server leaderboards";
 
     // 2. Fetch Approved Guilds List from Database
     // Select guild_id, tag, and name as requested
     const { data: guildsData } = await supabase
       .from("approved_guilds")
-      .select("guild_id, guild_tag, guild_name") 
+      .select("guild_id, guild_tag, guild_name")
       .order("guild_tag", { ascending: true });
 
     // 3. Format the list: "[TAG] Name"
     // We try to use the DB name. If empty, we try to fetch the name from Discord cache.
     const guildList = (guildsData || []).map(g => {
-        const name = g.guild_name || interaction.client.guilds.cache.get(g.guild_id)?.name || "Unknown Server";
-        return `**${g.guild_tag}** ${name}`;
+      const name = g.guild_name || interaction.client.guilds.cache.get(g.guild_id)?.name || "Unknown Server";
+      return `**${g.guild_tag}** ${name}`;
     }).join("\n");
 
     const helpEmbed = {
@@ -238,10 +254,10 @@ client.on("interactionCreate", async (interaction) => {
       thumbnail: guildConfig.thumbnail ? { url: guildConfig.thumbnail } : undefined,
       fields: [
         { name: "📊 /stats [user]", value: "View your personal career stats or check another driver's profile.", inline: false },
-        { name: "🏁 /speedlb", value: "View the leaderboard for Top Average Speeds.", inline: true },
-        { name: "📈 /levellb", value: "See who has the highest Career Level.", inline: true },
-        { name: "⭐ /bestdrivers", value: "Ranking based on Clean Deliveries (no damage/fines).", inline: true },
-        { name: "🚨 /worstdrivers", value: "Ranking by total penalties accumulated.", inline: true },
+        { name: "🏁 /speedlb [in_guild]", value: "View Top Average Speeds. Use `in_current_guild: True` for this server only.", inline: true },
+        { name: "📈 /levellb [in_guild]", value: "See highest Career Levels. Use `in_current_guild: True` to filter.", inline: true },
+        { name: "⭐ /bestdrivers [in_guild]", value: "Rank by Clean Deliveries. Use `in_current_guild: True` to filter.", inline: true },
+        { name: "🚨 /worstdrivers [in_guild]", value: "Rank by total penalties. Use `in_current_guild: True` to filter.", inline: true },
         { name: "🛠️ /clearstats", value: "**(Owner Only)** Reset a user's stats completely.", inline: true },
         // 👇 The new field listing all approved guilds inside the embed 👇
         { name: "✅ Approved VTCs", value: guildList || "No VTCs found.", inline: false },
@@ -258,11 +274,18 @@ client.on("interactionCreate", async (interaction) => {
   // COMMAND: WORST DRIVERS
   if (interaction.commandName === "worstdrivers") {
     await interaction.deferReply();
-    
+    const inGuild = interaction.options.getBoolean("in_current_guild");
+
     // Get all players with penalties
-    const { data: allStats } = await supabase
+    let query = supabase
       .from("player_stats")
-      .select("total_damage_penalty, total_time_penalty, players!inner(username, discord_id, guild_tag)");
+      .select("total_damage_penalty, total_time_penalty, players!inner(username, discord_id, guild_tag, guild_id)");
+
+    if (inGuild) {
+      query = query.eq("players.guild_id", interaction.guild.id);
+    }
+
+    const { data: allStats } = await query;
 
     if (!allStats?.length) return interaction.editReply("❌ No records yet.");
 
@@ -284,7 +307,7 @@ client.on("interactionCreate", async (interaction) => {
       return {
         name: `#${i + 1} ${tag} ${member?.displayName || row.players.username}`.trim(),
         value: `Penalty: **${Math.round(row.combinedPenalty)}**\n` +
-               `Damage: ${row.total_damage_penalty || 0} | Time: ${row.total_time_penalty || 0}`,
+          `Damage: ${row.total_damage_penalty || 0} | Time: ${row.total_time_penalty || 0}`,
         inline: false
       };
     }));
@@ -292,7 +315,7 @@ client.on("interactionCreate", async (interaction) => {
     const guildConfig = await getGuildConfig(interaction.guild.id);
     await interaction.editReply({
       embeds: [{
-        title: "🚨 Worst Drivers Leaderboard",
+        title: inGuild ? `🚨 Worst Drivers (${interaction.guild.name})` : "🚨 Global Worst Drivers",
         description: "Ranked by **Combined Penalties** (Damage + Time)",
         color: guildConfig.embed_color,
         thumbnail: guildConfig.thumbnail ? { url: guildConfig.thumbnail } : undefined,
@@ -304,15 +327,22 @@ client.on("interactionCreate", async (interaction) => {
   // COMMAND: BEST DRIVERS
   if (interaction.commandName === "bestdrivers") {
     await interaction.deferReply();
-    
+    const inGuild = interaction.options.getBoolean("in_current_guild");
+
     // Get all players, sort by clean_deliveries DESC, then total_score DESC
-    const { data: bestStats } = await supabase
+    let query = supabase
       .from("player_stats")
-      .select("clean_deliveries, total_score, players!inner(username, discord_id, guild_tag)")
+      .select("clean_deliveries, total_score, players!inner(username, discord_id, guild_tag, guild_id)")
       .gt("clean_deliveries", 0)
       .order("clean_deliveries", { ascending: false })
       .order("total_score", { ascending: false })
       .limit(100); // Get more to sort properly
+
+    if (inGuild) {
+      query = query.eq("players.guild_id", interaction.guild.id);
+    }
+
+    const { data: bestStats } = await query;
 
     if (!bestStats?.length) return interaction.editReply("❌ No records yet.");
 
@@ -332,7 +362,7 @@ client.on("interactionCreate", async (interaction) => {
       return {
         name: `#${i + 1} ${tag} ${member?.displayName || row.players.username}`.trim(),
         value: `Clean Deliveries: **${row.clean_deliveries || 0}**\n` +
-               `Total Score: **${Math.round(row.total_score || 0)}**`,
+          `Total Score: **${Math.round(row.total_score || 0)}**`,
         inline: false
       };
     }));
@@ -340,7 +370,7 @@ client.on("interactionCreate", async (interaction) => {
     const guildConfig = await getGuildConfig(interaction.guild.id);
     await interaction.editReply({
       embeds: [{
-        title: "⭐ Best Drivers Leaderboard",
+        title: inGuild ? `⭐ Best Drivers (${interaction.guild.name})` : "⭐ Global Best Drivers",
         description: "Ranked by **Clean Deliveries** (tie-breaker: Total Score)",
         color: guildConfig.embed_color,
         thumbnail: guildConfig.thumbnail ? { url: guildConfig.thumbnail } : undefined,
@@ -356,7 +386,7 @@ client.on("interactionCreate", async (interaction) => {
       return interaction.reply({ content: "❌ Permission denied.", ephemeral: true });
     }
     await interaction.deferReply({ ephemeral: true });
-    
+
     const target = interaction.options.getUser("user");
     const { data: player } = await supabase.from("players").select("id").eq("discord_id", target.id).single();
     if (!player) return interaction.editReply("❌ Player not found.");
