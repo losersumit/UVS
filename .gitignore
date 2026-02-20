@@ -31,4 +31,5 @@ build/
 *.exe
 *.dll
 
-unmute.js
+leave_server.js
+list_servers.js

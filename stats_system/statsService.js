@@ -167,6 +167,34 @@ async function applyRunStats(playerId, ocr, client) {
     throw new Error(`Database Error: Could not save run. ${runError.message}`);
   }
 
+  // 3. UPDATE GUILD INCOME
+  try {
+    const { data: player } = await supabase
+      .from("players")
+      .select("guild_id")
+      .eq("id", playerId)
+      .single();
+
+    if (player && player.guild_id && income > 0) {
+      const { data: guild } = await supabase
+        .from("approved_guilds")
+        .select("income")
+        .eq("guild_id", player.guild_id)
+        .single();
+
+      if (guild) {
+        const newGuildIncome = (Number(guild.income) || 0) + income;
+        await supabase
+          .from("approved_guilds")
+          .update({ income: newGuildIncome })
+          .eq("guild_id", player.guild_id);
+      }
+    }
+  } catch (guildUpdateErr) {
+    console.error("⚠️ Failed to update guild income:", guildUpdateErr);
+    // Non-fatal error for the user's run, so we just log it
+  }
+
   return { starsEarned };
 }
 

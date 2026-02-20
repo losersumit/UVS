@@ -22,7 +22,7 @@ async function getLeaderboardFields(data, guild, valueFormatter) {
             .fetch(row.players.discord_id)
             .catch(() => null);
           if (member) displayName = member.displayName;
-        } catch {}
+        } catch { }
       }
 
       const tag = row.players?.guild_tag || "";
@@ -74,9 +74,9 @@ async function updateLeaderboard(client, guildId) {
   try {
     // 1. Get Config (colors, branding, channel ID)
     const guildConfig = await getGuildConfig(guildId);
-    
+
     if (!guildConfig.leaderboard_channel_id) return;
-    
+
     // 2. Get Message IDs directly from DB (ensures persistence across restarts)
     const { data: guildRow, error } = await supabase
       .from("approved_guilds")
@@ -91,7 +91,7 @@ async function updateLeaderboard(client, guildId) {
       console.error(`Leaderboard channel not found for guild ${guildId}`);
       return;
     }
-    
+
     const guild = channel.guild;
 
     // ───────────── Distance Leaderboard ─────────────
@@ -102,8 +102,8 @@ async function updateLeaderboard(client, guildId) {
       .limit(5);
 
     const distanceFields = await getLeaderboardFields(
-      topDistance || [], 
-      guild, 
+      topDistance || [],
+      guild,
       (row) => `${Math.round(row.total_distance_km)} km`
     );
 
@@ -124,8 +124,8 @@ async function updateLeaderboard(client, guildId) {
       .limit(5);
 
     const timeFields = await getLeaderboardFields(
-      topTime || [], 
-      guild, 
+      topTime || [],
+      guild,
       (row) => formatMinutes(row.total_time_minutes)
     );
 
@@ -146,8 +146,8 @@ async function updateLeaderboard(client, guildId) {
       .limit(5);
 
     const scoreFields = await getLeaderboardFields(
-      topScore || [], 
-      guild, 
+      topScore || [],
+      guild,
       (row) => `Score: **${Math.round(row.total_score)}**\nStars: **${row.total_stars}**`
     );
 
@@ -172,16 +172,17 @@ async function updateLeaderboard(client, guildId) {
         total_time_minutes,
         total_stars,
         total_distance_km,
+        total_income,
         players!inner(guild_id, guild_tag)
       `);
 
     if (guildStats && guildStats.length > 0) {
       const guildAggregates = new Map();
-      
+
       for (const stat of guildStats) {
         const gid = stat.players?.guild_id;
         if (!gid) continue;
-        
+
         if (!guildAggregates.has(gid)) {
           guildAggregates.set(gid, {
             guild_id: gid,
@@ -189,38 +190,42 @@ async function updateLeaderboard(client, guildId) {
             total_score: 0,
             total_time_minutes: 0,
             total_stars: 0,
-            total_distance_km: 0
+            total_distance_km: 0,
+            total_income: 0
           });
         }
-        
+
         const agg = guildAggregates.get(gid);
         agg.total_score += Number(stat.total_score || 0);
         agg.total_time_minutes += Number(stat.total_time_minutes || 0);
         agg.total_stars += Number(stat.total_stars || 0);
         agg.total_distance_km += Number(stat.total_distance_km || 0);
+        agg.total_income += Number(stat.total_income || 0);
       }
-      
+
+      // Rank by Income
       const topGuilds = Array.from(guildAggregates.values())
-        .sort((a, b) => b.total_score - a.total_score)
+        .sort((a, b) => b.total_income - a.total_income)
         .slice(0, 3);
-      
+
       if (topGuilds.length > 0) {
         const guildFields = topGuilds.map((g, i) => {
           const hours = Math.floor(g.total_time_minutes / 60);
           const minutes = g.total_time_minutes % 60;
           return {
             name: `#${i + 1} ${g.guild_tag || "Unknown Guild"}`,
-            value: `Score: **${Math.round(g.total_score)}**\n` +
-                   `Time: ${hours}h ${minutes}m\n` +
-                   `Stars: **${g.total_stars}**\n` +
-                   `Distance: ${Math.round(g.total_distance_km)} km`,
+            value: `Income: **$${Math.round(g.total_income).toLocaleString()}**\n` +
+              `Score: **${Math.round(g.total_score).toLocaleString()}**\n` +
+              `Time: ${hours}h ${minutes}m\n` +
+              `Stars: **${Math.round(g.total_stars).toLocaleString()}**\n` +
+              `Distance: ${Math.round(g.total_distance_km).toLocaleString()} km`,
             inline: false
           };
         });
-        
+
         const guildEmbed = {
           title: "🏆 Top Guilds Leaderboard",
-          description: "Ranked by **Total Score** (sum of all members)",
+          description: "Ranked by **Total Income** (sum of all members)",
           color: guildConfig.embed_color,
           thumbnail: guildConfig.thumbnail ? { url: guildConfig.thumbnail } : undefined,
           fields: guildFields,
@@ -228,7 +233,7 @@ async function updateLeaderboard(client, guildId) {
             text: `Last updated • ${new Date().toLocaleString()}`
           }
         };
-        
+
         await sendOrUpdate(guildId, channel, "lb_msg_guilds", guildRow.lb_msg_guilds, guildEmbed);
       }
     }
