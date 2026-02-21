@@ -1,6 +1,7 @@
 // stats_system/statsService.js
 const { supabase } = require("./supabase");
 const { validateRun } = require("../anticheat");
+const { updateLeaderboard } = require("./leaderboardService");
 
 async function getOrCreatePlayer(discordId, username, guildId) {
   // Check if player already exists (GLOBAL - not per-server)
@@ -193,6 +194,24 @@ async function applyRunStats(playerId, ocr, client) {
   } catch (guildUpdateErr) {
     console.error("⚠️ Failed to update guild income:", guildUpdateErr);
     // Non-fatal error for the user's run, so we just log it
+  }
+
+  // 4. TRIGGER LEADERBOARD REFRESH DIRECTLY
+  try {
+    const { data: allGuilds } = await supabase
+      .from("approved_guilds")
+      .select("guild_id");
+
+    if (allGuilds) {
+      for (const guild of allGuilds) {
+        // Run asynchronously without blocking the user response
+        updateLeaderboard(client, guild.guild_id).catch(err =>
+          console.error(`Leaderboard passive update failed for ${guild.guild_id}:`, err)
+        );
+      }
+    }
+  } catch (err) {
+    console.error("Failed to trigger leaderboard updates:", err);
   }
 
   return { starsEarned };

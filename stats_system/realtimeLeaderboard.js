@@ -8,13 +8,13 @@ function registerLeaderboardRealtime(client) {
   const MIN_INTERVAL = 3000; // 3 seconds
 
   supabase
-    .channel("runs-changes")
+    .channel("guild-income-changes")
     .on(
       "postgres_changes",
       {
-        event: "INSERT",
+        event: "UPDATE",
         schema: "public",
-        table: "runs"
+        table: "approved_guilds"
       },
       async (payload) => {
         try {
@@ -23,8 +23,8 @@ function registerLeaderboardRealtime(client) {
           lastUpdate = Date.now();
 
           console.log(
-            "[REALTIME] New run inserted:",
-            payload.new.player_id
+            "[REALTIME] Guild income updated:",
+            payload.new.guild_tag
           );
 
           // GLOBAL system: Update leaderboards in ALL approved guilds
