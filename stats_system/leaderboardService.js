@@ -166,32 +166,6 @@ async function performLeaderboardUpdate(client, guildId) {
 
     await sendOrUpdate(guildId, channel, "lb_msg_time", guildRow.lb_msg_time, timeEmbed);
 
-    // ───────────── Score Leaderboard ─────────────
-    const { data: topScore } = await supabase
-      .from("player_stats")
-      .select("total_score, total_stars, players!inner(username, discord_id, guild_tag, guild_id)")
-      .order("total_score", { ascending: false })
-      .limit(5);
-
-    const scoreFields = await getLeaderboardFields(
-      topScore || [],
-      guild,
-      (row) => `Score: **${Math.round(row.total_score)}**\nStars: **${row.total_stars}**`
-    );
-
-    const scoreEmbed = {
-      title: "⭐ Career Score Leaderboard",
-      description: "Ranked by **Total Score**",
-      color: guildConfig.embed_color,
-      thumbnail: guildConfig.thumbnail ? { url: guildConfig.thumbnail } : undefined,
-      fields: scoreFields,
-      footer: {
-        text: `Last updated • ${new Date().toLocaleString()}`
-      }
-    };
-
-    await sendOrUpdate(guildId, channel, "lb_msg_score", guildRow.lb_msg_score, scoreEmbed);
-
     // ───────────── Top Guilds Leaderboard ─────────────
     // Fetch all approved guilds and their current net_worth
     const { data: guildsData } = await supabase
@@ -324,31 +298,37 @@ async function performGlobalWebhookUpdate(client) {
   try {
     const webhookClient = new WebhookClient({ url: webhookUrl });
 
-    // Distance
-    const { data: topDistance } = await supabase.from("player_stats").select("total_distance_km, players!inner(username, discord_id, guild_tag, guild_id)").order("total_distance_km", { ascending: false }).limit(5);
-    const distanceFields = await getGlobalLeaderboardFields(client, topDistance || [], (row) => `${Math.round(row.total_distance_km)} km`);
-    const distanceEmbed = { title: "🏆 Global Distance Leaderboard", color: 0xff7801, fields: distanceFields };
+    // Helper to fetch user avatar
+    const getAvatarUrl = async (discordId) => {
+      try {
+        const user = await client.users.fetch(discordId);
+        return user ? user.displayAvatarURL({ extension: 'png', size: 256 }) : null;
+      } catch {
+        return null;
+      }
+    };
 
-    // Time
-    const { data: topTime } = await supabase.from("player_stats").select("total_time_minutes, players!inner(username, discord_id, guild_tag, guild_id)").order("total_time_minutes", { ascending: false }).limit(5);
-    const timeFields = await getGlobalLeaderboardFields(client, topTime || [], (row) => formatMinutes(row.total_time_minutes));
-    const timeEmbed = { title: "⏱️ Global Driving Time Leaderboard", color: 0xff7801, fields: timeFields };
+    // Helper to fetch guild info (for avatar)
+    const getGuildAvatarUrl = async (guildId) => {
+      try {
+        const guild = await client.guilds.fetch(guildId);
+        return guild ? guild.iconURL({ extension: 'png', size: 256 }) : null;
+      } catch {
+        return null;
+      }
+    };
 
-    // Score
-    const { data: topScore } = await supabase.from("player_stats").select("total_score, total_stars, players!inner(username, discord_id, guild_tag, guild_id)").order("total_score", { ascending: false }).limit(5);
-    const scoreFields = await getGlobalLeaderboardFields(client, topScore || [], (row) => `Score: **${Math.round(row.total_score)}**\nStars: **${row.total_stars}**`);
-    const scoreEmbed = { title: "⭐ Global Career Score Leaderboard", description: "Ranked by **Total Score**", color: 0xff7801, fields: scoreFields, footer: { text: `Last updated • ${new Date().toLocaleString()}` } };
-
-    // Guilds
+    // ───────────── Guilds Leaderboard ─────────────
     const { data: guildsData } = await supabase.from("approved_guilds").select("guild_id, guild_tag, net_worth");
     const { data: guildStats } = await supabase.from("player_stats").select("total_score, total_time_minutes, total_stars, total_distance_km, players!inner(guild_id)");
 
     let guildEmbed = { title: "🏆 Top Global Guilds", description: "Ranked by **Net Worth**", color: 0xff7801, fields: [] };
-
+    
     if (guildsData && guildStats) {
       const guildAggregates = new Map();
       for (const guild of guildsData) {
         guildAggregates.set(guild.guild_id, {
+          guild_id: guild.guild_id,
           guild_tag: guild.guild_tag || "Unknown Guild", total_income: Number(guild.net_worth) || 0,
           total_score: 0, total_time_minutes: 0, total_stars: 0, total_distance_km: 0
         });
@@ -373,22 +353,53 @@ async function performGlobalWebhookUpdate(client) {
             inline: false
           };
         });
+        
+        // Fetch #1 Guild Logo for Thumbnail
+        const topGuildId = topGuilds[0].guild_id;
+        if (topGuildId) {
+          const guildAvatar = await getGuildAvatarUrl(topGuildId);
+          if (guildAvatar) guildEmbed.thumbnail = { url: guildAvatar };
+        }
       }
     }
 
-    const embeds = [distanceEmbed, timeEmbed, scoreEmbed, guildEmbed];
-    const msgId = process.env.GLOBAL_LB_WEBHOOK_MSG_ID;
+    // ───────────── Distance Leaderboard ─────────────
+    const { data: topDistance } = await supabase.from("player_stats").select("total_distance_km, players!inner(username, discord_id, guild_tag, guild_id)").order("total_distance_km", { ascending: false }).limit(5);
+    const distanceFields = await getGlobalLeaderboardFields(client, topDistance || [], (row) => `${Math.round(row.total_distance_km)} km`);
+    const distanceEmbed = { title: "🏆 Global Distance Leaderboard", color: 0xff7801, fields: distanceFields };
 
+    if (topDistance && topDistance.length > 0 && topDistance[0].players?.discord_id) {
+       const userAvatar = await getAvatarUrl(topDistance[0].players.discord_id);
+       if (userAvatar) distanceEmbed.thumbnail = { url: userAvatar };
+    }
+
+    // ───────────── Time Leaderboard ─────────────
+    const { data: topTime } = await supabase.from("player_stats").select("total_time_minutes, players!inner(username, discord_id, guild_tag, guild_id)").order("total_time_minutes", { ascending: false }).limit(5);
+    const timeFields = await getGlobalLeaderboardFields(client, topTime || [], (row) => formatMinutes(row.total_time_minutes));
+    
+    const timeEmbed = { 
+      title: "⏱️ Global Driving Time Leaderboard", 
+      color: 0xff7801, 
+      fields: timeFields,
+      footer: { text: `Managed by NMC • Last updated • ${new Date().toLocaleString()}` }
+    };
+
+    if (topTime && topTime.length > 0 && topTime[0].players?.discord_id) {
+       const userAvatar = await getAvatarUrl(topTime[0].players.discord_id);
+       if (userAvatar) timeEmbed.thumbnail = { url: userAvatar };
+    }
+
+    // Combine them (Guilds first, then Distance, then Time)
+    const embeds = [guildEmbed, distanceEmbed, timeEmbed];
+    const msgId = process.env.GLOBAL_LB_WEBHOOK_MSG_ID;
+    
     if (msgId && msgId.trim().length > 0) {
       try {
         await webhookClient.editMessage(msgId, { content: null, embeds });
       } catch (err) {
         console.warn("[Global Webhook] Failed to edit. Check if MSG_ID is correct.", err.message);
-        // You can uncomment the line below if you want it to still send a new message as a fallback
-        // await webhookClient.send({ content: null, embeds });
       }
     } else {
-      // If no ID is provided, just send a new message (useful for generating the very first one to copy the ID from)
       await webhookClient.send({ content: null, embeds });
     }
   } catch (err) {
