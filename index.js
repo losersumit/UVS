@@ -1,3 +1,12 @@
+/**
+ * ============================================================================
+ * MODULE: index.js
+ * PURPOSE: The main boot file and entry point for the UVS Discord Bot. 
+ *          Handles Discord client initialization, registers slash commands, 
+ *          manages interaction events (buttons/commands), and mounts the 
+ *          various subsystems (realtime, screenshots, inspector).
+ * ============================================================================
+ */
 require('dotenv').config();
 
 // ─── ENV SAFETY CHECK ───
@@ -13,13 +22,13 @@ function requireEnv(name) {
 // ───────────────────────
 
 const { Client, GatewayIntentBits } = require('discord.js');
-const { registerScreenshotListener } = require("./stats_system/screenshotListener");
-const { supabase } = require("./stats_system/supabase");
-const { registerLeaderboardRealtime } = require("./stats_system/realtimeLeaderboard");
-const { registerDailyInspector, runDailyInspection } = require("./stats_system/dailyInspector");
-const { isOwner } = require("./owner");
-const { isGuildApproved } = require("./guildGuard");
-const { getGuildConfig } = require("./stats_system/guildConfig");
+const { registerScreenshotListener } = require("./src/stats_system/screenshotListener");
+const { supabase } = require("./src/stats_system/supabase");
+const { registerLeaderboardRealtime } = require("./src/stats_system/realtimeLeaderboard");
+const { registerDailyInspector, runDailyInspection } = require("./src/stats_system/dailyInspector");
+const { isOwner } = require("./src/owner");
+const { isGuildApproved } = require("./src/guildGuard");
+const { getGuildConfig } = require("./src/stats_system/guildConfig");
 
 const client = new Client({
   intents: [

@@ -1,4 +1,12 @@
-// .uvs/anticheat.js
+/**
+ * ============================================================================
+ * MODULE: anticheat.js
+ * PURPOSE: Implements strict validation rules to detect and reject fraudulent
+ *          or impossible game runs. Checks include maximum distance, speed limits,
+ *          income caps, and backward level regression.
+ * ============================================================================
+ */
+// .uvs/src/anticheat.js
 
 const LIMITS = {
   MAX_AVG_SPEED: 180,          // km/h (Loose cap to allow for downhill/bugs)

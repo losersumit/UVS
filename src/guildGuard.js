@@ -1,4 +1,12 @@
-// .uvs/guildGuard.js
+/**
+ * ============================================================================
+ * MODULE: guildGuard.js
+ * PURPOSE: A security middleware that verifies if a Discord Server (Guild) 
+ *          is authorized to invite and use the Bot. Checks interactions 
+ *          against the 'approved_guilds' database table.
+ * ============================================================================
+ */
+// .uvs/src/guildGuard.js
 // Controls which servers (VTCs) are allowed to use the bot
 
 const { supabase } = require("./stats_system/supabase");

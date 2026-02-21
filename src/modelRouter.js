@@ -1,5 +1,12 @@
-// .uvs/modelRouter.js
-// Handles Vision model fallback (Scout → Maverick)
+/**
+ * ============================================================================
+ * MODULE: modelRouter.js
+ * PURPOSE: Handles API connections to the Groq LLM inference engine. Serves
+ *          as the routing layer for AI features, including Vision and Reasoning.
+ *          Implements model fallback (Scout -> Maverick) for stability.
+ * ============================================================================
+ */
+// .uvs/src/modelRouter.js
 
 const Groq = require("groq-sdk");
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
