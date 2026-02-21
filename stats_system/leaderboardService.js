@@ -230,7 +230,7 @@ async function updateLeaderboard(client, guildId) {
 
         const guildEmbed = {
           title: "🏆 Top Guilds Leaderboard",
-          description: "Ranked by **Total Income**",
+          description: "Ranked by **Net Worth**",
           color: guildConfig.embed_color,
           thumbnail: guildConfig.thumbnail ? { url: guildConfig.thumbnail } : undefined,
           fields: guildFields,

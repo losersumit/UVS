@@ -8,13 +8,13 @@ function registerLeaderboardRealtime(client) {
   const MIN_INTERVAL = 3000; // 3 seconds
 
   supabase
-    .channel("player-stats-changes")
+    .channel("runs-changes")
     .on(
       "postgres_changes",
       {
-        event: "UPDATE",
+        event: "INSERT",
         schema: "public",
-        table: "player_stats"
+        table: "runs"
       },
       async (payload) => {
         try {
@@ -23,7 +23,7 @@ function registerLeaderboardRealtime(client) {
           lastUpdate = Date.now();
 
           console.log(
-            "[REALTIME] player_stats updated:",
+            "[REALTIME] New run inserted:",
             payload.new.player_id
           );
 
@@ -32,7 +32,7 @@ function registerLeaderboardRealtime(client) {
           const { data: allGuilds } = await supabase
             .from("approved_guilds")
             .select("guild_id");
-          
+
           if (allGuilds) {
             for (const guild of allGuilds) {
               await updateLeaderboard(client, guild.guild_id).catch(console.error);
