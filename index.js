@@ -16,6 +16,7 @@ const { Client, GatewayIntentBits } = require('discord.js');
 const { registerScreenshotListener } = require("./stats_system/screenshotListener");
 const { supabase } = require("./stats_system/supabase");
 const { registerLeaderboardRealtime } = require("./stats_system/realtimeLeaderboard");
+const { registerDailyInspector, runDailyInspection } = require("./stats_system/dailyInspector");
 const { isOwner } = require("./owner");
 const { isGuildApproved } = require("./guildGuard");
 const { getGuildConfig } = require("./stats_system/guildConfig");
@@ -37,11 +38,16 @@ client.once("ready", async () => {
   // Register Realtime Listener
   registerLeaderboardRealtime(client);
 
+  // Register Daily AI Inspector Cron Jobs
+  registerDailyInspector(client);
+
   // Register Commands
   const commands = [
     { name: "stats", description: "Check trucking stats", options: [{ name: "user", description: "View stats of another player", type: 6, required: false }] },
     { name: "speedlb", description: "View top average speeds", options: [{ name: "in_current_guild", description: "Show only members of this server", type: 5, required: false }] },
     { name: "levellb", description: "View highest level truckers", options: [{ name: "in_current_guild", description: "Show only members of this server", type: 5, required: false }] },
+    { name: "distancelb", description: "View top drivers by total distance", options: [{ name: "in_current_guild", description: "Show only members of this server", type: 5, required: false }] },
+    { name: "timelb", description: "View top drivers by total time", options: [{ name: "in_current_guild", description: "Show only members of this server", type: 5, required: false }] },
     { name: "worstdrivers", description: "View worst drivers by penalties", options: [{ name: "in_current_guild", description: "Show only members of this server", type: 5, required: false }] },
     { name: "bestdrivers", description: "View best drivers by clean deliveries", options: [{ name: "in_current_guild", description: "Show only members of this server", type: 5, required: false }] },
     { name: "clearstats", description: "Clear a user's stats (Owner Only)", options: [{ name: "user", description: "User to clear", type: 6, required: true }] },
@@ -219,6 +225,90 @@ client.on("interactionCreate", async (interaction) => {
     });
   }
 
+  // COMMAND: DISTANCE LB
+  if (interaction.commandName === "distancelb") {
+    await interaction.deferReply();
+    const inGuild = interaction.options.getBoolean("in_current_guild");
+
+    let query = supabase
+      .from("player_stats")
+      .select("total_distance_km, players!inner(username, discord_id, guild_tag, guild_id)")
+      .gt("total_distance_km", 0)
+      .order("total_distance_km", { ascending: false })
+      .limit(5);
+
+    if (inGuild) {
+      query = query.eq("players.guild_id", interaction.guild.id);
+    }
+
+    const { data: distanceStats } = await query;
+
+    if (!distanceStats?.length) return interaction.editReply("❌ No records yet.");
+
+    const fields = await Promise.all(distanceStats.map(async (row, i) => {
+      const member = await interaction.guild.members.fetch(row.players.discord_id).catch(() => null);
+      const tag = row.players?.guild_tag || "";
+      return {
+        name: `#${i + 1} ${tag} ${member?.displayName || row.players.username}`.trim(),
+        value: `🛤️ ${Math.round(row.total_distance_km).toLocaleString()} km`,
+        inline: false
+      };
+    }));
+
+    const guildConfig = await getGuildConfig(interaction.guild.id);
+    await interaction.editReply({
+      embeds: [{
+        title: inGuild ? `🛤️ Distance Leaderboard (${interaction.guild.name})` : "🛤️ Global Distance Leaderboard",
+        color: guildConfig.embed_color,
+        thumbnail: guildConfig.thumbnail ? { url: guildConfig.thumbnail } : undefined,
+        fields
+      }]
+    });
+  }
+
+  // COMMAND: TIME LB
+  if (interaction.commandName === "timelb") {
+    await interaction.deferReply();
+    const inGuild = interaction.options.getBoolean("in_current_guild");
+
+    let query = supabase
+      .from("player_stats")
+      .select("total_time_minutes, players!inner(username, discord_id, guild_tag, guild_id)")
+      .gt("total_time_minutes", 0)
+      .order("total_time_minutes", { ascending: false })
+      .limit(5);
+
+    if (inGuild) {
+      query = query.eq("players.guild_id", interaction.guild.id);
+    }
+
+    const { data: timeStats } = await query;
+
+    if (!timeStats?.length) return interaction.editReply("❌ No records yet.");
+
+    const fields = await Promise.all(timeStats.map(async (row, i) => {
+      const member = await interaction.guild.members.fetch(row.players.discord_id).catch(() => null);
+      const tag = row.players?.guild_tag || "";
+      const hours = Math.floor(row.total_time_minutes / 60);
+      const minutes = row.total_time_minutes % 60;
+      return {
+        name: `#${i + 1} ${tag} ${member?.displayName || row.players.username}`.trim(),
+        value: `⏱️ ${hours}h ${minutes}m`,
+        inline: false
+      };
+    }));
+
+    const guildConfig = await getGuildConfig(interaction.guild.id);
+    await interaction.editReply({
+      embeds: [{
+        title: inGuild ? `⏱️ Driving Time Leaderboard (${interaction.guild.name})` : "⏱️ Global Driving Time Leaderboard",
+        color: guildConfig.embed_color,
+        thumbnail: guildConfig.thumbnail ? { url: guildConfig.thumbnail } : undefined,
+        fields
+      }]
+    });
+  }
+
   // COMMAND: HELP
   if (interaction.commandName === "help") {
     await interaction.deferReply();
@@ -256,6 +346,8 @@ client.on("interactionCreate", async (interaction) => {
         { name: "📊 /stats [user]", value: "View your personal career stats or check another driver's profile.", inline: false },
         { name: "🏁 /speedlb [in_guild]", value: "View Top Average Speeds. Use `in_current_guild: True` for this server only.", inline: true },
         { name: "📈 /levellb [in_guild]", value: "See highest Career Levels. Use `in_current_guild: True` to filter.", inline: true },
+        { name: "🛤️ /distancelb [in_guild]", value: "Rank by Total Distance. Use `in_current_guild: True` to filter.", inline: true },
+        { name: "⏱️ /timelb [in_guild]", value: "Rank by Total Time Driven. Use `in_current_guild: True` to filter.", inline: true },
         { name: "⭐ /bestdrivers [in_guild]", value: "Rank by Clean Deliveries. Use `in_current_guild: True` to filter.", inline: true },
         { name: "🚨 /worstdrivers [in_guild]", value: "Rank by total penalties. Use `in_current_guild: True` to filter.", inline: true },
         { name: "🛠️ /clearstats", value: "**(Owner Only)** Reset a user's stats completely.", inline: true },

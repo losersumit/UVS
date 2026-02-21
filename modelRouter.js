@@ -52,4 +52,30 @@ async function extractWithFallback(prompt, base64Image) {
   }
 }
 
-module.exports = { extractWithFallback };
+async function analyzeRunsWithReasoning(prompt) {
+  try {
+    if (!process.env.GROQ_API_KEY) {
+      console.error("❌ Reasoning analysis failed: Missing GROQ_API_KEY in .env");
+      return null;
+    }
+
+    const res = await groq.chat.completions.create({
+      model: "openai/gpt-oss-120b",
+      temperature: 0.2, // Low temp for more factual analysis
+      max_completion_tokens: 4096,
+      response_format: { type: "json_object" },
+      messages: [
+        {
+          role: "user",
+          content: prompt
+        }
+      ]
+    });
+    return JSON.parse(res.choices[0].message.content);
+  } catch (err) {
+    console.error("Reasoning analysis failed:", err.message);
+    return null;
+  }
+}
+
+module.exports = { extractWithFallback, analyzeRunsWithReasoning };
