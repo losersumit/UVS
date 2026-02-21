@@ -178,15 +178,15 @@ async function applyRunStats(playerId, ocr, client) {
     if (player && player.guild_id && income > 0) {
       const { data: guild } = await supabase
         .from("approved_guilds")
-        .select("income")
+        .select("net_worth")
         .eq("guild_id", player.guild_id)
         .single();
 
       if (guild) {
-        const newGuildIncome = (Number(guild.income) || 0) + income;
+        const newGuildIncome = (Number(guild.net_worth) || 0) + income;
         await supabase
           .from("approved_guilds")
-          .update({ income: newGuildIncome })
+          .update({ net_worth: newGuildIncome })
           .eq("guild_id", player.guild_id);
       }
     }

@@ -165,6 +165,11 @@ async function updateLeaderboard(client, guildId) {
     await sendOrUpdate(guildId, channel, "lb_msg_score", guildRow.lb_msg_score, scoreEmbed);
 
     // ───────────── Top Guilds Leaderboard ─────────────
+    // Fetch all approved guilds and their current net_worth
+    const { data: guildsData } = await supabase
+      .from("approved_guilds")
+      .select("guild_id, guild_tag, net_worth");
+
     const { data: guildStats } = await supabase
       .from("player_stats")
       .select(`
@@ -172,38 +177,38 @@ async function updateLeaderboard(client, guildId) {
         total_time_minutes,
         total_stars,
         total_distance_km,
-        total_income,
-        players!inner(guild_id, guild_tag)
+        players!inner(guild_id)
       `);
 
-    if (guildStats && guildStats.length > 0) {
+    if (guildsData && guildStats) {
       const guildAggregates = new Map();
 
+      // Initialize map with guild data
+      for (const guild of guildsData) {
+        guildAggregates.set(guild.guild_id, {
+          guild_id: guild.guild_id,
+          guild_tag: guild.guild_tag || "Unknown Guild",
+          total_income: Number(guild.net_worth) || 0, // Read net_worth
+          total_score: 0,
+          total_time_minutes: 0,
+          total_stars: 0,
+          total_distance_km: 0
+        });
+      }
+
+      // Aggregate player stats into their respective guilds
       for (const stat of guildStats) {
         const gid = stat.players?.guild_id;
-        if (!gid) continue;
-
-        if (!guildAggregates.has(gid)) {
-          guildAggregates.set(gid, {
-            guild_id: gid,
-            guild_tag: stat.players?.guild_tag || "",
-            total_score: 0,
-            total_time_minutes: 0,
-            total_stars: 0,
-            total_distance_km: 0,
-            total_income: 0
-          });
-        }
+        if (!gid || !guildAggregates.has(gid)) continue;
 
         const agg = guildAggregates.get(gid);
         agg.total_score += Number(stat.total_score || 0);
         agg.total_time_minutes += Number(stat.total_time_minutes || 0);
         agg.total_stars += Number(stat.total_stars || 0);
         agg.total_distance_km += Number(stat.total_distance_km || 0);
-        agg.total_income += Number(stat.total_income || 0);
       }
 
-      // Rank by Income
+      // Rank by Income (net_worth)
       const topGuilds = Array.from(guildAggregates.values())
         .sort((a, b) => b.total_income - a.total_income)
         .slice(0, 3);
@@ -213,7 +218,7 @@ async function updateLeaderboard(client, guildId) {
           const hours = Math.floor(g.total_time_minutes / 60);
           const minutes = g.total_time_minutes % 60;
           return {
-            name: `#${i + 1} ${g.guild_tag || "Unknown Guild"}`,
+            name: `#${i + 1} ${g.guild_tag}`,
             value: `Income: **$${Math.round(g.total_income).toLocaleString()}**\n` +
               `Score: **${Math.round(g.total_score).toLocaleString()}**\n` +
               `Time: ${hours}h ${minutes}m\n` +
@@ -225,7 +230,7 @@ async function updateLeaderboard(client, guildId) {
 
         const guildEmbed = {
           title: "🏆 Top Guilds Leaderboard",
-          description: "Ranked by **Total Income** (sum of all members)",
+          description: "Ranked by **Total Income**",
           color: guildConfig.embed_color,
           thumbnail: guildConfig.thumbnail ? { url: guildConfig.thumbnail } : undefined,
           fields: guildFields,
