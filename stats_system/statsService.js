@@ -1,7 +1,7 @@
 // stats_system/statsService.js
 const { supabase } = require("./supabase");
 const { validateRun } = require("../anticheat");
-const { updateLeaderboard } = require("./leaderboardService");
+const { updateLeaderboard, updateGlobalWebhook } = require("./leaderboardService");
 
 async function getOrCreatePlayer(discordId, username, guildId) {
   // Check if player already exists (GLOBAL - not per-server)
@@ -210,6 +210,11 @@ async function applyRunStats(playerId, ocr, client) {
         );
       }
     }
+
+    // Also trigger the Global Webhook update
+    updateGlobalWebhook(client).catch(err =>
+      console.error("Global webhook trigger failed:", err)
+    );
   } catch (err) {
     console.error("Failed to trigger leaderboard updates:", err);
   }
