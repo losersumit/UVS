@@ -20,7 +20,7 @@ Extract these exact values into JSON:
   "damage_penalty": number, (remove currency symbol)
   "time_penalty": number, (remove currency symbol)
   "income": number, (Total money earned)
-  "level": number, (The level shown on the bar)
+  "level": number, (The level shown on the left the green bar)
   "xp": number (current XP if visible, else 0)
 }
 

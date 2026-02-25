@@ -10,7 +10,7 @@
 
 const LIMITS = {
   MAX_AVG_SPEED: 180,          // km/h (Loose cap to allow for downhill/bugs)
-  MAX_DISTANCE_PER_RUN: 620,  // km
+  MAX_DISTANCE_PER_RUN: 720,  // km
   MAX_INCOME_PER_RUN: 45000,  // game currency per run
   MAX_INCOME_PER_KM: 120,     // game currency per km
 };

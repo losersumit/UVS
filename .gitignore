@@ -31,6 +31,6 @@ build/
 *.exe
 *.dll
 
-leave_server.js
-list_servers.js
-spying.js
+scripts/leave_server.js
+scripts/list_servers.js
+scripts/spying.js
