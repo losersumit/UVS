@@ -11,7 +11,7 @@
 const process = require('process');
 
 function isOwner(userId) {
-    const ownerId = process.env.OWNER_ID || "739327867200274473"; // Your user ID
+    const ownerId = process.env.OWNER_ID || "1084255828107853844"; // Your user ID
     return userId === ownerId;
 }
 
