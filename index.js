@@ -59,6 +59,7 @@ client.once("ready", async () => {
     { name: "timelb", description: "View top drivers by total time", options: [{ name: "in_current_guild", description: "Show only members of this server", type: 5, required: false }] },
     { name: "worstdrivers", description: "View worst drivers by penalties", options: [{ name: "in_current_guild", description: "Show only members of this server", type: 5, required: false }] },
     { name: "bestdrivers", description: "View best drivers by clean deliveries", options: [{ name: "in_current_guild", description: "Show only members of this server", type: 5, required: false }] },
+    { name: "myvtc", description: "View complete stats and global rank for your current VTC" },
     { name: "clearstats", description: "Clear a user's stats (Owner Only)", options: [{ name: "user", description: "User to clear", type: 6, required: true }] },
     { name: "help", description: "Show bot instructions and commands" }
   ];
@@ -318,6 +319,92 @@ client.on("interactionCreate", async (interaction) => {
     });
   }
 
+  // COMMAND: MYVTC
+  if (interaction.commandName === "myvtc") {
+    await interaction.deferReply();
+    const guildId = interaction.guild.id;
+
+    // 1. Get all guilds to calculate rank
+    const { data: guildsData } = await supabase
+      .from("approved_guilds")
+      .select("guild_id, guild_tag, guild_name, net_worth");
+
+    if (!guildsData) {
+      return interaction.editReply("❌ Failed to fetch VTC data.");
+    }
+
+    const currentGuild = guildsData.find(g => g.guild_id === guildId);
+    if (!currentGuild) {
+      return interaction.editReply("❌ This server is not an approved VTC.");
+    }
+
+    // 2. Get stats of all players to aggregate per guild
+    const { data: guildStats } = await supabase
+      .from("player_stats")
+      .select("total_score, total_time_minutes, total_stars, total_distance_km, clean_deliveries, players!inner(guild_id)");
+
+    const guildAggregates = new Map();
+    for (const guild of guildsData) {
+      guildAggregates.set(guild.guild_id, {
+        guild_id: guild.guild_id,
+        guild_tag: guild.guild_tag || "Unknown",
+        guild_name: guild.guild_name || interaction.client.guilds.cache.get(guild.guild_id)?.name || "Unknown Server",
+        total_income: Number(guild.net_worth) || 0,
+        total_score: 0,
+        total_time_minutes: 0,
+        total_stars: 0,
+        total_distance_km: 0,
+        clean_deliveries: 0,
+        member_count: 0
+      });
+    }
+
+    if (guildStats) {
+      for (const stat of guildStats) {
+        const gid = stat.players?.guild_id;
+        if (!gid || !guildAggregates.has(gid)) continue;
+        const agg = guildAggregates.get(gid);
+        agg.total_score += Number(stat.total_score || 0);
+        agg.total_time_minutes += Number(stat.total_time_minutes || 0);
+        agg.total_stars += Number(stat.total_stars || 0);
+        agg.total_distance_km += Number(stat.total_distance_km || 0);
+        agg.clean_deliveries += Number(stat.clean_deliveries || 0);
+        agg.member_count += 1;
+      }
+    }
+
+    // 3. Calculate rank based on Income (net_worth)
+    const sortedGuilds = Array.from(guildAggregates.values()).sort((a, b) => b.total_income - a.total_income);
+    const rank = sortedGuilds.findIndex(g => g.guild_id === guildId) + 1;
+    const myGuildStats = guildAggregates.get(guildId);
+
+    const hours = Math.floor(myGuildStats.total_time_minutes / 60);
+    const minutes = myGuildStats.total_time_minutes % 60;
+
+    const guildConfig = await getGuildConfig(interaction.guild.id);
+
+    const embed = {
+      title: `🏢 ${myGuildStats.guild_tag} | ${myGuildStats.guild_name}`,
+      description: `**Global VTC Rank: #${rank}** out of ${sortedGuilds.length}`,
+      color: guildConfig.embed_color,
+      thumbnail: guildConfig.thumbnail ? { url: guildConfig.thumbnail } : { url: interaction.guild.iconURL() },
+      fields: [
+        { name: "Active Drivers", value: `${myGuildStats.member_count}`, inline: true },
+        { name: "Total Income (Net Worth)", value: `$${Math.round(myGuildStats.total_income).toLocaleString()}`, inline: true },
+        { name: "Total Score", value: `${Math.round(myGuildStats.total_score).toLocaleString()}`, inline: true },
+        { name: "Total Distance", value: `${Math.round(myGuildStats.total_distance_km).toLocaleString()} km`, inline: true },
+        { name: "Driving Time", value: `${hours}h ${minutes}m`, inline: true },
+        { name: "Total Stars", value: `⭐ ${Math.round(myGuildStats.total_stars).toLocaleString()}`, inline: true },
+        { name: "Clean Deliveries", value: `${myGuildStats.clean_deliveries}`, inline: true }
+      ],
+      footer: {
+        text: "Keep trucking to improve your VTC rank!"
+      }
+    };
+
+    await interaction.editReply({ embeds: [embed] });
+  }
+
   // COMMAND: HELP
   if (interaction.commandName === "help") {
     await interaction.deferReply();
@@ -359,6 +446,7 @@ client.on("interactionCreate", async (interaction) => {
         { name: "⏱️ /timelb [in_guild]", value: "Rank by Total Time Driven. Use `in_current_guild: True` to filter.", inline: true },
         { name: "⭐ /bestdrivers [in_guild]", value: "Rank by Clean Deliveries. Use `in_current_guild: True` to filter.", inline: true },
         { name: "🚨 /worstdrivers [in_guild]", value: "Rank by total penalties. Use `in_current_guild: True` to filter.", inline: true },
+        { name: "🏢 /myvtc", value: "View complete stats and global rank for your VTC.", inline: true },
         { name: "🛠️ /clearstats", value: "**(Owner Only)** Reset a user's stats completely.", inline: true },
         // 👇 The new field listing all approved guilds inside the embed 👇
         { name: "✅ Approved VTCs", value: guildList || "No VTCs found.", inline: false },
