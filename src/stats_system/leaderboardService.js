@@ -282,6 +282,10 @@ async function performGlobalWebhookUpdate(client) {
 
   try {
     const webhookClient = new WebhookClient({ url: webhookUrl });
+    const webhook = await webhookClient.fetch().catch(() => null);
+    const webhookChannel = webhook?.channelId
+      ? await client.channels.fetch(webhook.channelId).catch(() => null)
+      : null;
 
     // Emojis removed string formatting due to external webhook restrictions
 
@@ -343,12 +347,35 @@ async function performGlobalWebhookUpdate(client) {
 
       let messageSuccess = false;
 
-      if (guild.webhook_id && String(guild.webhook_id).trim().length > 0) {
+      let messageId = guild.webhook_id ? String(guild.webhook_id).trim() : null;
+
+      // DB can return Snowflakes as rounded numbers in some setups.
+      // Prefer recovering the true ID from the webhook channel by matching embed title.
+      if (webhookChannel?.messages?.fetch) {
         try {
-          await webhookClient.editMessage(String(guild.webhook_id).trim(), { content: null, embeds: [embed] });
+          const recentMessages = await webhookChannel.messages.fetch({ limit: 100 });
+          const matched = recentMessages.find(
+            (msg) =>
+              msg.author?.id === webhook?.id &&
+              msg.embeds?.[0]?.title === embed.title
+          );
+          if (matched?.id) {
+            messageId = matched.id;
+          }
+        } catch (_) {
+          // non-fatal: fallback to DB id / sending new message
+        }
+      }
+
+      if (messageId && messageId.length > 0) {
+        try {
+          await webhookClient.editMessage(messageId, { content: null, embeds: [embed] });
+          if (messageId !== String(guild.webhook_id || "").trim()) {
+            await supabase.from("approved_guilds").update({ webhook_id: messageId }).eq("guild_id", guild.guild_id);
+          }
           messageSuccess = true;
         } catch (err) {
-          console.warn(`[Global Webhook] Failed to edit msg ${guild.webhook_id} for ${guild.guild_name} (${err.message}). Sending new msg...`);
+          console.warn(`[Global Webhook] Failed to edit msg ${messageId} for ${guild.guild_name} (${err.message}). Sending new msg...`);
         }
       }
 
