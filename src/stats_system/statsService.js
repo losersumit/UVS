@@ -3,7 +3,7 @@ const { supabase } = require("./supabase");
 const { validateRun } = require("../anticheat");
 const { updateLeaderboard, updateGlobalWebhook } = require("./leaderboardService");
 
-async function getOrCreatePlayer(discordId, username, guildId) {
+async function getOrCreatePlayer(discordId, username, displayName, guildId) {
   // Check if player already exists (GLOBAL - not per-server)
   let { data: player } = await supabase
     .from("players")
@@ -27,6 +27,7 @@ async function getOrCreatePlayer(discordId, username, guildId) {
       .insert({
         discord_id: discordId,
         username,
+        display_name: displayName,
         guild_id: guildId, // Store for display purposes only, not for locking
         guild_tag: guild.guild_tag
       })
@@ -38,6 +39,17 @@ async function getOrCreatePlayer(discordId, username, guildId) {
     // Create initial stats row
     await supabase.from("player_stats").insert({ player_id: newPlayer.id });
     return newPlayer;
+  }
+
+  // Existing player — UPDATE NAME IF CHANGED
+  if (player.username !== username || player.display_name !== displayName) {
+    const { data: updatedPlayer } = await supabase
+      .from("players")
+      .update({ username, display_name: displayName })
+      .eq("id", player.id)
+      .select()
+      .single();
+    if (updatedPlayer) player = updatedPlayer;
   }
 
   // Existing player — NO GUILD LOCKING
@@ -179,15 +191,16 @@ async function applyRunStats(playerId, ocr, client) {
     if (player && player.guild_id && income > 0) {
       const { data: guild } = await supabase
         .from("approved_guilds")
-        .select("net_worth")
+        .select("net_worth, runs")
         .eq("guild_id", player.guild_id)
         .single();
 
       if (guild) {
         const newGuildIncome = (Number(guild.net_worth) || 0) + income;
+        const newRuns = (Number(guild.runs) || 0) + 1;
         await supabase
           .from("approved_guilds")
-          .update({ net_worth: newGuildIncome })
+          .update({ net_worth: newGuildIncome, runs: newRuns })
           .eq("guild_id", player.guild_id);
       }
     }

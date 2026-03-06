@@ -92,7 +92,7 @@ client.on("interactionCreate", async (interaction) => {
 
     const { data: stats, error } = await supabase
       .from("player_stats")
-      .select("*, players!inner(username, discord_id, guild_tag)")
+      .select("*, players!inner(username, display_name, guild_tag)")
       .eq("players.discord_id", targetUser.id)
       .maybeSingle();
 
@@ -100,8 +100,7 @@ client.on("interactionCreate", async (interaction) => {
       return interaction.editReply("❌ No stats found for this user.");
     }
 
-    const member = await interaction.guild.members.fetch(targetUser.id).catch(() => null);
-    const displayName = member?.displayName || targetUser.username;
+    const displayName = stats.players?.display_name || stats.players?.username || targetUser.username;
     const hours = Math.floor((stats.total_time_minutes || 0) / 60);
     const minutes = (stats.total_time_minutes || 0) % 60;
 
@@ -160,7 +159,7 @@ client.on("interactionCreate", async (interaction) => {
 
     let query = supabase
       .from("player_stats")
-      .select("current_level, players!inner(username, discord_id, guild_tag, guild_id)")
+      .select("current_level, players!inner(username, display_name, guild_tag, guild_id)")
       .gt("current_level", 0)
       .order("current_level", { ascending: false })
       .limit(5);
@@ -174,10 +173,9 @@ client.on("interactionCreate", async (interaction) => {
     if (!levelStats?.length) return interaction.editReply("❌ No records yet.");
 
     const fields = await Promise.all(levelStats.map(async (row, i) => {
-      const member = await interaction.guild.members.fetch(row.players.discord_id).catch(() => null);
       const tag = row.players?.guild_tag || "";
       return {
-        name: `#${i + 1} ${tag} ${member?.displayName || row.players.username}`.trim(),
+        name: `#${i + 1} ${tag} ${row.players.display_name || row.players.username}`.trim(),
         value: `🏅 Level ${row.current_level}`,
         inline: false
       };
@@ -201,7 +199,7 @@ client.on("interactionCreate", async (interaction) => {
 
     let query = supabase
       .from("player_stats")
-      .select("best_avg_speed_kmph, players!inner(username, discord_id, guild_tag, guild_id)")
+      .select("best_avg_speed_kmph, players!inner(username, display_name, guild_tag, guild_id)")
       .gt("best_avg_speed_kmph", 0)
       .order("best_avg_speed_kmph", { ascending: false })
       .limit(5);
@@ -215,10 +213,9 @@ client.on("interactionCreate", async (interaction) => {
     if (!speedStats?.length) return interaction.editReply("❌ No records yet.");
 
     const fields = await Promise.all(speedStats.map(async (row, i) => {
-      const member = await interaction.guild.members.fetch(row.players.discord_id).catch(() => null);
       const tag = row.players?.guild_tag || "";
       return {
-        name: `#${i + 1} ${tag} ${member?.displayName || row.players.username}`.trim(),
+        name: `#${i + 1} ${tag} ${row.players.display_name || row.players.username}`.trim(),
         value: `💨 ${row.best_avg_speed_kmph} km/h`,
         inline: false
       };
@@ -242,7 +239,7 @@ client.on("interactionCreate", async (interaction) => {
 
     let query = supabase
       .from("player_stats")
-      .select("total_distance_km, players!inner(username, discord_id, guild_tag, guild_id)")
+      .select("total_distance_km, players!inner(username, display_name, guild_tag, guild_id)")
       .gt("total_distance_km", 0)
       .order("total_distance_km", { ascending: false })
       .limit(5);
@@ -256,10 +253,9 @@ client.on("interactionCreate", async (interaction) => {
     if (!distanceStats?.length) return interaction.editReply("❌ No records yet.");
 
     const fields = await Promise.all(distanceStats.map(async (row, i) => {
-      const member = await interaction.guild.members.fetch(row.players.discord_id).catch(() => null);
       const tag = row.players?.guild_tag || "";
       return {
-        name: `#${i + 1} ${tag} ${member?.displayName || row.players.username}`.trim(),
+        name: `#${i + 1} ${tag} ${row.players.display_name || row.players.username}`.trim(),
         value: `🛤️ ${Math.round(row.total_distance_km).toLocaleString()} km`,
         inline: false
       };
@@ -283,7 +279,7 @@ client.on("interactionCreate", async (interaction) => {
 
     let query = supabase
       .from("player_stats")
-      .select("total_time_minutes, players!inner(username, discord_id, guild_tag, guild_id)")
+      .select("total_time_minutes, players!inner(username, display_name, guild_tag, guild_id)")
       .gt("total_time_minutes", 0)
       .order("total_time_minutes", { ascending: false })
       .limit(5);
@@ -297,12 +293,11 @@ client.on("interactionCreate", async (interaction) => {
     if (!timeStats?.length) return interaction.editReply("❌ No records yet.");
 
     const fields = await Promise.all(timeStats.map(async (row, i) => {
-      const member = await interaction.guild.members.fetch(row.players.discord_id).catch(() => null);
       const tag = row.players?.guild_tag || "";
       const hours = Math.floor(row.total_time_minutes / 60);
       const minutes = row.total_time_minutes % 60;
       return {
-        name: `#${i + 1} ${tag} ${member?.displayName || row.players.username}`.trim(),
+        name: `#${i + 1} ${tag} ${row.players.display_name || row.players.username}`.trim(),
         value: `⏱️ ${hours}h ${minutes}m`,
         inline: false
       };
@@ -468,7 +463,7 @@ client.on("interactionCreate", async (interaction) => {
     // Get all players with penalties
     let query = supabase
       .from("player_stats")
-      .select("total_damage_penalty, total_time_penalty, players!inner(username, discord_id, guild_tag, guild_id)");
+      .select("total_damage_penalty, total_time_penalty, players!inner(username, display_name, guild_tag, guild_id)");
 
     if (inGuild) {
       query = query.eq("players.guild_id", interaction.guild.id);
@@ -491,10 +486,9 @@ client.on("interactionCreate", async (interaction) => {
     if (!withPenalties.length) return interaction.editReply("❌ No drivers with penalties yet.");
 
     const fields = await Promise.all(withPenalties.map(async (row, i) => {
-      const member = await interaction.guild.members.fetch(row.players.discord_id).catch(() => null);
       const tag = row.players?.guild_tag || "";
       return {
-        name: `#${i + 1} ${tag} ${member?.displayName || row.players.username}`.trim(),
+        name: `#${i + 1} ${tag} ${row.players.display_name || row.players.username}`.trim(),
         value: `Penalty: **${Math.round(row.combinedPenalty)}**\n` +
           `Damage: ${row.total_damage_penalty || 0} | Time: ${row.total_time_penalty || 0}`,
         inline: false
@@ -521,7 +515,7 @@ client.on("interactionCreate", async (interaction) => {
     // Get all players, sort by clean_deliveries DESC, then total_score DESC
     let query = supabase
       .from("player_stats")
-      .select("clean_deliveries, total_score, players!inner(username, discord_id, guild_tag, guild_id)")
+      .select("clean_deliveries, total_score, players!inner(username, display_name, guild_tag, guild_id)")
       .gt("clean_deliveries", 0)
       .order("clean_deliveries", { ascending: false })
       .order("total_score", { ascending: false })
@@ -546,10 +540,9 @@ client.on("interactionCreate", async (interaction) => {
       .slice(0, 3);
 
     const fields = await Promise.all(sorted.map(async (row, i) => {
-      const member = await interaction.guild.members.fetch(row.players.discord_id).catch(() => null);
       const tag = row.players?.guild_tag || "";
       return {
-        name: `#${i + 1} ${tag} ${member?.displayName || row.players.username}`.trim(),
+        name: `#${i + 1} ${tag} ${row.players.display_name || row.players.username}`.trim(),
         value: `Clean Deliveries: **${row.clean_deliveries || 0}**\n` +
           `Total Score: **${Math.round(row.total_score || 0)}**`,
         inline: false

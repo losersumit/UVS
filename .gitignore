@@ -34,3 +34,5 @@ build/
 scripts/leave_server.js
 scripts/list_servers.js
 scripts/spying.js
+supabase_tables.json
+approved_guilds_rows.csv

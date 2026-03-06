@@ -29,20 +29,20 @@ function registerScreenshotListener(client) {
 
       // Get server-specific config
       const guildConfig = await getGuildConfig(message.guild?.id);
-      
+
       // only allow screenshots in the defined channel
       if (!guildConfig.screenshot_channel_id || message.channel.id !== guildConfig.screenshot_channel_id) return;
- 
+
       // delete any text-only messages in screenshot channel
       if (message.content && message.content.trim().length > 0 && message.attachments.size === 0) {
-         await message.delete().catch(() => {});
-         return;
+        await message.delete().catch(() => { });
+        return;
       }
 
       // must have exactly ONE attachment
       if (!message.attachments || message.attachments.size !== 1) {
         if (message.attachments && message.attachments.size > 1) {
-          await message.react("❌").catch(() => {});
+          await message.react("❌").catch(() => { });
         }
         return;
       }
@@ -86,7 +86,7 @@ function registerScreenshotListener(client) {
         await message.react("❌");
 
         if (ocrResult?.sarcasm) {
-          await message.reply(ocrResult.sarcasm).catch(() => {});
+          await message.reply(ocrResult.sarcasm).catch(() => { });
         }
         return;
       }
@@ -98,6 +98,7 @@ function registerScreenshotListener(client) {
         player = await getOrCreatePlayer(
           message.author.id,
           message.author.username,
+          message.author.globalName || message.member?.displayName || message.author.username,
           message.guild.id
         );
       } catch (err) {
@@ -118,21 +119,21 @@ function registerScreenshotListener(client) {
       await message.react("✅");
 
       // Use server-specific star emojis
-      if (starsEarned >= 1) await message.react(guildConfig.star_1_emoji).catch(() => {});
-      if (starsEarned >= 2) await message.react(guildConfig.star_2_emoji).catch(() => {});
-      if (starsEarned >= 3) await message.react(guildConfig.star_3_emoji).catch(() => {});
+      if (starsEarned >= 1) await message.react(guildConfig.star_1_emoji).catch(() => { });
+      if (starsEarned >= 2) await message.react(guildConfig.star_2_emoji).catch(() => { });
+      if (starsEarned >= 3) await message.react(guildConfig.star_3_emoji).catch(() => { });
 
       console.log("GEMINI RESULT:", ocrResult);
 
     } catch (err) {
       console.error("Screenshot listener error:", err);
-      
+
       // 🔴 FIX: Clean up hourglass and show error on ANY failure
       try {
         await message.reactions.cache.get("⏳")?.remove();
         await message.react("❌");
         // Reply with the error message so you know what went wrong (e.g. Database Error)
-        await message.reply(`❌ Error processing run: ${err.message}`).catch(() => {});
+        await message.reply(`❌ Error processing run: ${err.message}`).catch(() => { });
       } catch (cleanupErr) {
         // failed to react/reply, just log it
       }
