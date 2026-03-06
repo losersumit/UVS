@@ -286,6 +286,9 @@ async function performGlobalWebhookUpdate(client) {
     const webhookChannel = webhook?.channelId
       ? await client.channels.fetch(webhook.channelId).catch(() => null)
       : null;
+    const recentWebhookMessages = webhookChannel?.messages?.fetch
+      ? await webhookChannel.messages.fetch({ limit: 100 }).catch(() => null)
+      : null;
 
     // Emojis removed string formatting due to external webhook restrictions
 
@@ -337,12 +340,13 @@ async function performGlobalWebhookUpdate(client) {
         parsedColor = 0xffffff;
       }
 
+      const guildMarker = `GID:${guild.guild_id}`;
       const embed = {
         title: `🏢 ${guild.guild_tag || "[VTC]"} ${guild.guild_name || "Unknown Guild"}`,
         description,
         color: parsedColor,
         thumbnail: guild.avatar_url ? { url: guild.avatar_url } : undefined,
-        footer: { text: `Managed by NMC • Last updated • ${new Date().toLocaleString()}` }
+        footer: { text: `Managed by NMC • Last updated • ${new Date().toLocaleString()} • ${guildMarker}` }
       };
 
       let messageSuccess = false;
@@ -350,20 +354,24 @@ async function performGlobalWebhookUpdate(client) {
       let messageId = guild.webhook_id ? String(guild.webhook_id).trim() : null;
 
       // DB can return Snowflakes as rounded numbers in some setups.
-      // Prefer recovering the true ID from the webhook channel by matching embed title.
-      if (webhookChannel?.messages?.fetch) {
-        try {
-          const recentMessages = await webhookChannel.messages.fetch({ limit: 100 });
-          const matched = recentMessages.find(
-            (msg) =>
-              msg.author?.id === webhook?.id &&
-              msg.embeds?.[0]?.title === embed.title
-          );
-          if (matched?.id) {
-            messageId = matched.id;
-          }
-        } catch (_) {
-          // non-fatal: fallback to DB id / sending new message
+      // Recover IDs from webhook history using a deterministic guild marker.
+      if (recentWebhookMessages) {
+        const matchedByMarker = recentWebhookMessages.find(
+          (msg) =>
+            msg.author?.id === webhook?.id &&
+            msg.embeds?.[0]?.footer?.text?.includes(guildMarker)
+        );
+        const matchedByTitle = recentWebhookMessages.find(
+          (msg) =>
+            msg.author?.id === webhook?.id &&
+            msg.embeds?.[0]?.title === embed.title
+        );
+
+        if (matchedByMarker?.id) {
+          messageId = matchedByMarker.id;
+        } else if (matchedByTitle?.id) {
+          // Backward-compat for old messages created before marker footer existed.
+          messageId = matchedByTitle.id;
         }
       }
 
