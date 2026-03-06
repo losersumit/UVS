@@ -27,8 +27,6 @@ function registerLeaderboardRealtime(client) {
             payload.new.guild_tag
           );
 
-          // GLOBAL system: Update leaderboards in ALL approved guilds
-          // When any player's stats change, all servers' leaderboards must update
           const { data: allGuilds } = await supabase
             .from("approved_guilds")
             .select("guild_id");

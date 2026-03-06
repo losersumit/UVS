@@ -59,12 +59,12 @@ client.once("ready", async () => {
   // Register Commands
   const commands = [
     { name: "stats", description: "Check trucking stats", options: [{ name: "user", description: "View stats of another player", type: 6, required: false }] },
-    { name: "speedlb", description: "View top average speeds", options: [{ name: "in_current_guild", description: "Show only members of this server", type: 5, required: false }] },
-    { name: "levellb", description: "View highest level truckers", options: [{ name: "in_current_guild", description: "Show only members of this server", type: 5, required: false }] },
-    { name: "distancelb", description: "View top drivers by total distance", options: [{ name: "in_current_guild", description: "Show only members of this server", type: 5, required: false }] },
-    { name: "timelb", description: "View top drivers by total time", options: [{ name: "in_current_guild", description: "Show only members of this server", type: 5, required: false }] },
-    { name: "worstdrivers", description: "View worst drivers by penalties", options: [{ name: "in_current_guild", description: "Show only members of this server", type: 5, required: false }] },
-    { name: "bestdrivers", description: "View best drivers by clean deliveries", options: [{ name: "in_current_guild", description: "Show only members of this server", type: 5, required: false }] },
+    { name: "speedlb", description: "View top average speeds", options: [{ name: "global", description: "Show all approved VTC members", type: 5, required: false }] },
+    { name: "levellb", description: "View highest level truckers", options: [{ name: "global", description: "Show all approved VTC members", type: 5, required: false }] },
+    { name: "distancelb", description: "View top drivers by total distance", options: [{ name: "global", description: "Show all approved VTC members", type: 5, required: false }] },
+    { name: "timelb", description: "View top drivers by total time", options: [{ name: "global", description: "Show all approved VTC members", type: 5, required: false }] },
+    { name: "worstdrivers", description: "View worst drivers by penalties", options: [{ name: "global", description: "Show all approved VTC members", type: 5, required: false }] },
+    { name: "bestdrivers", description: "View best drivers by clean deliveries", options: [{ name: "global", description: "Show all approved VTC members", type: 5, required: false }] },
     { name: "myvtc", description: "View complete stats and global rank for your current VTC" },
     { name: "clearstats", description: "Clear a user's stats (Owner Only)", options: [{ name: "user", description: "User to clear", type: 6, required: true }] },
     { name: "help", description: "Show bot instructions and commands" }
@@ -161,7 +161,7 @@ client.on("interactionCreate", async (interaction) => {
   // COMMAND: LEVEL LB
   if (interaction.commandName === "levellb") {
     await interaction.deferReply();
-    const inGuild = interaction.options.getBoolean("in_current_guild");
+    const isGlobal = interaction.options.getBoolean("global") === true;
 
     let query = supabase
       .from("player_stats")
@@ -170,7 +170,7 @@ client.on("interactionCreate", async (interaction) => {
       .order("current_level", { ascending: false })
       .limit(5);
 
-    if (inGuild) {
+    if (!isGlobal) {
       query = query.eq("players.guild_id", interaction.guild.id);
     }
 
@@ -190,7 +190,7 @@ client.on("interactionCreate", async (interaction) => {
     const guildConfig = await getGuildConfig(interaction.guild.id);
     await interaction.editReply({
       embeds: [{
-        title: inGuild ? `📈 Level Leaderboard (${interaction.guild.name})` : "📈 Global Level Leaderboard",
+        title: isGlobal ? "📈 Global Level Leaderboard" : `📈 Level Leaderboard (${interaction.guild.name})`,
         color: guildConfig.embed_color,
         thumbnail: guildConfig.thumbnail ? { url: guildConfig.thumbnail } : undefined,
         fields
@@ -201,7 +201,7 @@ client.on("interactionCreate", async (interaction) => {
   // COMMAND: SPEED LB
   if (interaction.commandName === "speedlb") {
     await interaction.deferReply();
-    const inGuild = interaction.options.getBoolean("in_current_guild");
+    const isGlobal = interaction.options.getBoolean("global") === true;
 
     let query = supabase
       .from("player_stats")
@@ -210,7 +210,7 @@ client.on("interactionCreate", async (interaction) => {
       .order("best_avg_speed_kmph", { ascending: false })
       .limit(5);
 
-    if (inGuild) {
+    if (!isGlobal) {
       query = query.eq("players.guild_id", interaction.guild.id);
     }
 
@@ -230,7 +230,7 @@ client.on("interactionCreate", async (interaction) => {
     const guildConfig = await getGuildConfig(interaction.guild.id);
     await interaction.editReply({
       embeds: [{
-        title: inGuild ? `🏁 Speed Leaderboard (${interaction.guild.name})` : "🏁 Global Speed Leaderboard",
+        title: isGlobal ? "🏁 Global Speed Leaderboard" : `🏁 Speed Leaderboard (${interaction.guild.name})`,
         color: guildConfig.embed_color,
         thumbnail: guildConfig.thumbnail ? { url: guildConfig.thumbnail } : undefined,
         fields
@@ -241,7 +241,7 @@ client.on("interactionCreate", async (interaction) => {
   // COMMAND: DISTANCE LB
   if (interaction.commandName === "distancelb") {
     await interaction.deferReply();
-    const inGuild = interaction.options.getBoolean("in_current_guild");
+    const isGlobal = interaction.options.getBoolean("global") === true;
 
     let query = supabase
       .from("player_stats")
@@ -250,7 +250,7 @@ client.on("interactionCreate", async (interaction) => {
       .order("total_distance_km", { ascending: false })
       .limit(5);
 
-    if (inGuild) {
+    if (!isGlobal) {
       query = query.eq("players.guild_id", interaction.guild.id);
     }
 
@@ -270,7 +270,7 @@ client.on("interactionCreate", async (interaction) => {
     const guildConfig = await getGuildConfig(interaction.guild.id);
     await interaction.editReply({
       embeds: [{
-        title: inGuild ? `🛤️ Distance Leaderboard (${interaction.guild.name})` : "🛤️ Global Distance Leaderboard",
+        title: isGlobal ? "🛤️ Global Distance Leaderboard" : `🛤️ Distance Leaderboard (${interaction.guild.name})`,
         color: guildConfig.embed_color,
         thumbnail: guildConfig.thumbnail ? { url: guildConfig.thumbnail } : undefined,
         fields
@@ -281,7 +281,7 @@ client.on("interactionCreate", async (interaction) => {
   // COMMAND: TIME LB
   if (interaction.commandName === "timelb") {
     await interaction.deferReply();
-    const inGuild = interaction.options.getBoolean("in_current_guild");
+    const isGlobal = interaction.options.getBoolean("global") === true;
 
     let query = supabase
       .from("player_stats")
@@ -290,7 +290,7 @@ client.on("interactionCreate", async (interaction) => {
       .order("total_time_minutes", { ascending: false })
       .limit(5);
 
-    if (inGuild) {
+    if (!isGlobal) {
       query = query.eq("players.guild_id", interaction.guild.id);
     }
 
@@ -312,7 +312,7 @@ client.on("interactionCreate", async (interaction) => {
     const guildConfig = await getGuildConfig(interaction.guild.id);
     await interaction.editReply({
       embeds: [{
-        title: inGuild ? `⏱️ Driving Time Leaderboard (${interaction.guild.name})` : "⏱️ Global Driving Time Leaderboard",
+        title: isGlobal ? "⏱️ Global Driving Time Leaderboard" : `⏱️ Driving Time Leaderboard (${interaction.guild.name})`,
         color: guildConfig.embed_color,
         thumbnail: guildConfig.thumbnail ? { url: guildConfig.thumbnail } : undefined,
         fields
@@ -441,12 +441,12 @@ client.on("interactionCreate", async (interaction) => {
       thumbnail: guildConfig.thumbnail ? { url: guildConfig.thumbnail } : undefined,
       fields: [
         { name: "📊 /stats [user]", value: "View your personal career stats or check another driver's profile.", inline: false },
-        { name: "🏁 /speedlb [in_guild]", value: "View Top Average Speeds. Use `in_current_guild: True` for this server only.", inline: true },
-        { name: "📈 /levellb [in_guild]", value: "See highest Career Levels. Use `in_current_guild: True` to filter.", inline: true },
-        { name: "🛤️ /distancelb [in_guild]", value: "Rank by Total Distance. Use `in_current_guild: True` to filter.", inline: true },
-        { name: "⏱️ /timelb [in_guild]", value: "Rank by Total Time Driven. Use `in_current_guild: True` to filter.", inline: true },
-        { name: "⭐ /bestdrivers [in_guild]", value: "Rank by Clean Deliveries. Use `in_current_guild: True` to filter.", inline: true },
-        { name: "🚨 /worstdrivers [in_guild]", value: "Rank by total penalties. Use `in_current_guild: True` to filter.", inline: true },
+        { name: "🏁 /speedlb [global]", value: "View Top Average Speeds. Default is current server only. Set `global: True` for all servers.", inline: true },
+        { name: "📈 /levellb [global]", value: "See highest Career Levels. Default is current server only. Set `global: True` to include all servers.", inline: true },
+        { name: "🛤️ /distancelb [global]", value: "Rank by Total Distance. Default is current server only. Set `global: True` to include all servers.", inline: true },
+        { name: "⏱️ /timelb [global]", value: "Rank by Total Time Driven. Default is current server only. Set `global: True` to include all servers.", inline: true },
+        { name: "⭐ /bestdrivers [global]", value: "Rank by Clean Deliveries. Default is current server only. Set `global: True` to include all servers.", inline: true },
+        { name: "🚨 /worstdrivers [global]", value: "Rank by total penalties. Default is current server only. Set `global: True` to include all servers.", inline: true },
         { name: "🏢 /myvtc", value: "View complete stats and global rank for your VTC.", inline: true },
         { name: "🛠️ /clearstats", value: "**(Owner Only)** Reset a user's stats completely.", inline: true },
         // 👇 The new field listing all approved guilds inside the embed 👇
@@ -464,14 +464,14 @@ client.on("interactionCreate", async (interaction) => {
   // COMMAND: WORST DRIVERS
   if (interaction.commandName === "worstdrivers") {
     await interaction.deferReply();
-    const inGuild = interaction.options.getBoolean("in_current_guild");
+    const isGlobal = interaction.options.getBoolean("global") === true;
 
     // Get all players with penalties
     let query = supabase
       .from("player_stats")
       .select("total_damage_penalty, total_time_penalty, players!inner(username, display_name, guild_tag, guild_id)");
 
-    if (inGuild) {
+    if (!isGlobal) {
       query = query.eq("players.guild_id", interaction.guild.id);
     }
 
@@ -504,7 +504,7 @@ client.on("interactionCreate", async (interaction) => {
     const guildConfig = await getGuildConfig(interaction.guild.id);
     await interaction.editReply({
       embeds: [{
-        title: inGuild ? `🚨 Worst Drivers (${interaction.guild.name})` : "🚨 Global Worst Drivers",
+        title: isGlobal ? "🚨 Global Worst Drivers" : `🚨 Worst Drivers (${interaction.guild.name})`,
         description: "Ranked by **Combined Penalties** (Damage + Time)",
         color: guildConfig.embed_color,
         thumbnail: guildConfig.thumbnail ? { url: guildConfig.thumbnail } : undefined,
@@ -516,7 +516,7 @@ client.on("interactionCreate", async (interaction) => {
   // COMMAND: BEST DRIVERS
   if (interaction.commandName === "bestdrivers") {
     await interaction.deferReply();
-    const inGuild = interaction.options.getBoolean("in_current_guild");
+    const isGlobal = interaction.options.getBoolean("global") === true;
 
     // Get all players, sort by clean_deliveries DESC, then total_score DESC
     let query = supabase
@@ -527,7 +527,7 @@ client.on("interactionCreate", async (interaction) => {
       .order("total_score", { ascending: false })
       .limit(100); // Get more to sort properly
 
-    if (inGuild) {
+    if (!isGlobal) {
       query = query.eq("players.guild_id", interaction.guild.id);
     }
 
@@ -558,7 +558,7 @@ client.on("interactionCreate", async (interaction) => {
     const guildConfig = await getGuildConfig(interaction.guild.id);
     await interaction.editReply({
       embeds: [{
-        title: inGuild ? `⭐ Best Drivers (${interaction.guild.name})` : "⭐ Global Best Drivers",
+        title: isGlobal ? "⭐ Global Best Drivers" : `⭐ Best Drivers (${interaction.guild.name})`,
         description: "Ranked by **Clean Deliveries** (tie-breaker: Total Score)",
         color: guildConfig.embed_color,
         thumbnail: guildConfig.thumbnail ? { url: guildConfig.thumbnail } : undefined,
