@@ -25,6 +25,7 @@ const { Client, GatewayIntentBits } = require('discord.js');
 const { registerScreenshotListener } = require("./src/stats_system/screenshotListener");
 const { supabase } = require("./src/stats_system/supabase");
 const { registerLeaderboardRealtime } = require("./src/stats_system/realtimeLeaderboard");
+const { updateGlobalWebhook } = require("./src/stats_system/leaderboardService");
 const { registerDailyInspector, runDailyInspection } = require("./src/stats_system/dailyInspector");
 const { isOwner } = require("./src/owner");
 const { isGuildApproved } = require("./src/guildGuard");
@@ -49,6 +50,11 @@ client.once("ready", async () => {
 
   // Register Daily AI Inspector Cron Jobs
   registerDailyInspector(client);
+
+  // Update Global Webhook on Restart
+  updateGlobalWebhook(client).catch(err =>
+    console.error("Global webhook update on restart failed:", err)
+  );
 
   // Register Commands
   const commands = [

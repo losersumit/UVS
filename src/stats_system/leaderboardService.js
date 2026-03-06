@@ -304,9 +304,17 @@ async function performGlobalWebhookUpdate(client) {
 
     function getClosestEmoji(decimalColor) {
       if (!decimalColor) return colorEmojis.white;
-      const r = (decimalColor >> 16) & 255;
-      const g = (decimalColor >> 8) & 255;
-      const b = decimalColor & 255;
+
+      // Attempt to cast string hex (e.g. "#FF7801" or "0xFF7801") into a safe number
+      let numColor = decimalColor;
+      if (typeof decimalColor === 'string') {
+        numColor = parseInt(decimalColor.replace('#', ''), 16);
+      }
+      if (isNaN(numColor)) numColor = 0xffffff;
+
+      const r = (numColor >> 16) & 255;
+      const g = (numColor >> 8) & 255;
+      const b = numColor & 255;
 
       let minDistance = Infinity;
       let closest = 'white';
@@ -368,9 +376,9 @@ async function performGlobalWebhookUpdate(client) {
         footer: { text: `Managed by NMC • Last updated • ${new Date().toLocaleString()}` }
       };
 
-      if (guild.webhook_id && guild.webhook_id.trim().length > 0) {
+      if (guild.webhook_id && String(guild.webhook_id).trim().length > 0) {
         try {
-          await webhookClient.editMessage(guild.webhook_id, { content: null, embeds: [embed] });
+          await webhookClient.editMessage(String(guild.webhook_id).trim(), { content: null, embeds: [embed] });
         } catch (err) {
           console.warn(`[Global Webhook] Failed to edit msg ${guild.webhook_id} for ${guild.guild_name}:`, err.message);
         }
