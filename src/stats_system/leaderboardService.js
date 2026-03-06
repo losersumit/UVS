@@ -341,26 +341,22 @@ async function performGlobalWebhookUpdate(client) {
         footer: { text: `Managed by NMC • Last updated • ${new Date().toLocaleString()}` }
       };
 
-      let messageSuccess = false;
+      const messageId = guild.webhook_id ? String(guild.webhook_id).trim() : null;
 
-      if (guild.webhook_id && String(guild.webhook_id).trim().length > 0) {
+      if (messageId) {
         try {
-          await webhookClient.editMessage(String(guild.webhook_id).trim(), { content: null, embeds: [embed] });
-          messageSuccess = true;
+          await webhookClient.editMessage(messageId, { content: null, embeds: [embed] });
+          continue;
         } catch (err) {
-          console.warn(`[Global Webhook] Failed to edit msg ${guild.webhook_id} for ${guild.guild_name} (${err.message}). Sending new msg...`);
+          console.warn(`[Global Webhook] Failed to edit msg ${messageId} for ${guild.guild_name} (${err.message}). Sending new msg...`);
         }
       }
 
-      if (!messageSuccess) {
-        try {
-          const sentMessage = await webhookClient.send({ content: null, embeds: [embed] });
-          // Save the webhook_id back to DB so we edit next time
-          await supabase.from("approved_guilds").update({ webhook_id: sentMessage.id }).eq("guild_id", guild.guild_id);
-          console.log(`[Global Webhook] Sent new embed for ${guild.guild_name} with ID ${sentMessage.id}`);
-        } catch (err) {
-          console.error(`[Global Webhook] Failed to send new msg for ${guild.guild_name}:`, err.message);
-        }
+      try {
+        const sentMessage = await webhookClient.send({ content: null, embeds: [embed] });
+        console.log(`[Global Webhook] Sent new embed for ${guild.guild_name} with ID ${sentMessage.id}`);
+      } catch (err) {
+        console.error(`[Global Webhook] Failed to send new msg for ${guild.guild_name}:`, err.message);
       }
     }
 
