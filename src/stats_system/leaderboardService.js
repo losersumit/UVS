@@ -283,53 +283,10 @@ async function performGlobalWebhookUpdate(client) {
   try {
     const webhookClient = new WebhookClient({ url: webhookUrl });
 
-    // Hardcoded color emojis (no disk I/O)
-    const colorEmojis = {
-      yellow: "<a:yellow:1479475245394956339>",
-      purple: "<a:purple:1479475241792049273>",
-      white: "<a:white:1479475238185210078>",
-      cyan: "<a:cyan:1479475235496529950>",
-      green: "<a:green:1479475232451330210>",
-      black: "<a:black:1479475230400450610>",
-      orange: "<a:orange:1479475227133083659>",
-      red: "<a:red:1479475224104931579>",
-      blue: "<a:blue:1479475220900483144>"
-    };
-
-    const rgbMap = {
-      yellow: [255, 255, 0], purple: [128, 0, 128], white: [255, 255, 255],
-      cyan: [0, 255, 255], green: [0, 128, 0], black: [0, 0, 0],
-      orange: [255, 165, 0], red: [255, 0, 0], blue: [0, 0, 255]
-    };
-
-    function getClosestEmoji(decimalColor) {
-      if (!decimalColor) return colorEmojis.white;
-
-      // Attempt to cast string hex (e.g. "#FF7801" or "0xFF7801") into a safe number
-      let numColor = decimalColor;
-      if (typeof decimalColor === 'string') {
-        numColor = parseInt(decimalColor.replace('#', ''), 16);
-      }
-      if (isNaN(numColor)) numColor = 0xffffff;
-
-      const r = (numColor >> 16) & 255;
-      const g = (numColor >> 8) & 255;
-      const b = numColor & 255;
-
-      let minDistance = Infinity;
-      let closest = 'white';
-      for (const [name, rgb] of Object.entries(rgbMap)) {
-        const dist = Math.sqrt(Math.pow(r - rgb[0], 2) + Math.pow(g - rgb[1], 2) + Math.pow(b - rgb[2], 2));
-        if (dist < minDistance) {
-          minDistance = dist;
-          closest = name;
-        }
-      }
-      return colorEmojis[closest];
-    }
+    // Emojis removed string formatting due to external webhook restrictions
 
     // ───────────── Guilds Leaderboard ─────────────
-    const { data: guildsData } = await supabase.from("approved_guilds").select("guild_id, guild_tag, guild_name, net_worth, embed_color, webhook_id, avatar_url, runs");
+    const { data: guildsData } = await supabase.from("approved_guilds").select("guild_id, guild_tag, guild_name, net_worth, embed_color, webhook_id:webhook_id::text, avatar_url, runs");
     const { data: guildStats } = await supabase.from("player_stats").select("total_time_minutes, total_distance_km, players!inner(guild_id)");
 
     if (!guildsData) return;
@@ -360,29 +317,42 @@ async function performGlobalWebhookUpdate(client) {
     for (const guild of guildAggregates.values()) {
       const hours = Math.floor(guild.total_time_minutes / 60);
       const minutes = guild.total_time_minutes % 60;
-      const d = getClosestEmoji(guild.embed_color);
+      let description = `**Net Worth:** $${Math.round(guild.total_income).toLocaleString()}\n`;
+      description += `**Drivers:** ${guild.driver_count}\n`;
+      description += `**Time:** ${hours}h ${minutes}m\n`;
+      description += `**Distance:** ${Math.round(guild.total_distance_km).toLocaleString()} km\n`;
+      description += `**Runs:** ${guild.total_runs}`;
 
-      let description = `${d} **Net Worth:** $${Math.round(guild.total_income).toLocaleString()}\n`;
-      description += `${d} **Drivers:** ${guild.driver_count}\n`;
-      description += `${d} **Time:** ${hours}h ${minutes}m\n`;
-      description += `${d} **Distance:** ${Math.round(guild.total_distance_km).toLocaleString()} km\n`;
-      description += `${d} **Runs:** ${guild.total_runs}`;
+      let parsedColor = 0xffffff;
+      if (typeof guild.embed_color === 'number') {
+        parsedColor = guild.embed_color;
+      } else if (typeof guild.embed_color === 'string') {
+        parsedColor = parseInt(guild.embed_color.replace('#', ''), 16);
+      }
+      if (isNaN(parsedColor) || parsedColor > 16777215 || parsedColor < 0) {
+        parsedColor = 0xffffff;
+      }
 
       const embed = {
         title: `🏢 ${guild.guild_tag || "[VTC]"} ${guild.guild_name || "Unknown Guild"}`,
         description,
-        color: guild.embed_color || 0xffffff,
+        color: parsedColor,
         thumbnail: guild.avatar_url ? { url: guild.avatar_url } : undefined,
         footer: { text: `Managed by NMC • Last updated • ${new Date().toLocaleString()}` }
       };
 
+      let messageSuccess = false;
+
       if (guild.webhook_id && String(guild.webhook_id).trim().length > 0) {
         try {
           await webhookClient.editMessage(String(guild.webhook_id).trim(), { content: null, embeds: [embed] });
+          messageSuccess = true;
         } catch (err) {
-          console.warn(`[Global Webhook] Failed to edit msg ${guild.webhook_id} for ${guild.guild_name}:`, err.message);
+          console.warn(`[Global Webhook] Failed to edit msg ${guild.webhook_id} for ${guild.guild_name} (${err.message}). Sending new msg...`);
         }
-      } else {
+      }
+
+      if (!messageSuccess) {
         try {
           const sentMessage = await webhookClient.send({ content: null, embeds: [embed] });
           // Save the webhook_id back to DB so we edit next time
