@@ -361,7 +361,7 @@ async function performGlobalWebhookUpdate(client) {
       description += `${d} **Runs:** ${guild.total_runs}`;
 
       const embed = {
-        title: `🏢 [${guild.guild_tag || "VTC"}] ${guild.guild_name || "Unknown Guild"}`,
+        title: `🏢 ${guild.guild_tag || "[VTC]"} ${guild.guild_name || "Unknown Guild"}`,
         description,
         color: guild.embed_color || 0xffffff,
         thumbnail: guild.avatar_url ? { url: guild.avatar_url } : undefined,

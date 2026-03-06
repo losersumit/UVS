@@ -35,16 +35,16 @@ async function getGuildConfig(guildId) {
     avatar_url: guild.avatar_url || null,
     embed_color: guild.embed_color || 0xff7801,
     thumbnail: guild.avatar_url || null,
-    
+
     // Channels
     screenshot_channel_id: guild.screenshot_channel_id || null,
     leaderboard_channel_id: guild.leaderboard_channel_id || null,
-    
-    // Emojis
-    star_1_emoji: guild.star_1_emoji || "⭐",
-    star_2_emoji: guild.star_2_emoji || "⭐",
-    star_3_emoji: guild.star_3_emoji || "⭐",
-    
+
+    // Emojis (Hardcoded since DB columns were deleted)
+    star_1_emoji: "1464126270349508681",
+    star_2_emoji: "1464126542438207538",
+    star_3_emoji: "1464126268453818555",
+
     // Features
     enable_clear_stats: guild.enable_clear_stats !== false // default true
   };
@@ -66,9 +66,9 @@ function getDefaultConfig() {
     thumbnail: null,
     screenshot_channel_id: null,
     leaderboard_channel_id: null,
-    star_1_emoji: "⭐",
-    star_2_emoji: "⭐",
-    star_3_emoji: "⭐",
+    star_1_emoji: "1464126270349508681",
+    star_2_emoji: "1464126542438207538",
+    star_3_emoji: "1464126268453818555",
     enable_clear_stats: true
   };
 }
