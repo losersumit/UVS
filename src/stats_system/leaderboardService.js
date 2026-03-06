@@ -282,13 +282,6 @@ async function performGlobalWebhookUpdate(client) {
 
   try {
     const webhookClient = new WebhookClient({ url: webhookUrl });
-    const webhook = await webhookClient.fetch().catch(() => null);
-    const webhookChannel = webhook?.channelId
-      ? await client.channels.fetch(webhook.channelId).catch(() => null)
-      : null;
-    const recentWebhookMessages = webhookChannel?.messages?.fetch
-      ? await webhookChannel.messages.fetch({ limit: 100 }).catch(() => null)
-      : null;
 
     // Emojis removed string formatting due to external webhook restrictions
 
@@ -340,62 +333,30 @@ async function performGlobalWebhookUpdate(client) {
         parsedColor = 0xffffff;
       }
 
-      const guildMarker = `GID:${guild.guild_id}`;
       const embed = {
         title: `🏢 ${guild.guild_tag || "[VTC]"} ${guild.guild_name || "Unknown Guild"}`,
         description,
         color: parsedColor,
         thumbnail: guild.avatar_url ? { url: guild.avatar_url } : undefined,
-        footer: { text: `Managed by NMC • Last updated • ${new Date().toLocaleString()} • ${guildMarker}` }
+        footer: { text: `Managed by NMC • Last updated • ${new Date().toLocaleString()}` }
       };
 
-      let messageSuccess = false;
+      const messageId = guild.webhook_id ? String(guild.webhook_id).trim() : null;
 
-      let messageId = guild.webhook_id ? String(guild.webhook_id).trim() : null;
-
-      // DB can return Snowflakes as rounded numbers in some setups.
-      // Recover IDs from webhook history using a deterministic guild marker.
-      if (recentWebhookMessages) {
-        const matchedByMarker = recentWebhookMessages.find(
-          (msg) =>
-            msg.author?.id === webhook?.id &&
-            msg.embeds?.[0]?.footer?.text?.includes(guildMarker)
-        );
-        const matchedByTitle = recentWebhookMessages.find(
-          (msg) =>
-            msg.author?.id === webhook?.id &&
-            msg.embeds?.[0]?.title === embed.title
-        );
-
-        if (matchedByMarker?.id) {
-          messageId = matchedByMarker.id;
-        } else if (matchedByTitle?.id) {
-          // Backward-compat for old messages created before marker footer existed.
-          messageId = matchedByTitle.id;
-        }
-      }
-
-      if (messageId && messageId.length > 0) {
+      if (messageId) {
         try {
           await webhookClient.editMessage(messageId, { content: null, embeds: [embed] });
-          if (messageId !== String(guild.webhook_id || "").trim()) {
-            await supabase.from("approved_guilds").update({ webhook_id: messageId }).eq("guild_id", guild.guild_id);
-          }
-          messageSuccess = true;
+          continue;
         } catch (err) {
           console.warn(`[Global Webhook] Failed to edit msg ${messageId} for ${guild.guild_name} (${err.message}). Sending new msg...`);
         }
       }
 
-      if (!messageSuccess) {
-        try {
-          const sentMessage = await webhookClient.send({ content: null, embeds: [embed] });
-          // Save the webhook_id back to DB so we edit next time
-          await supabase.from("approved_guilds").update({ webhook_id: sentMessage.id }).eq("guild_id", guild.guild_id);
-          console.log(`[Global Webhook] Sent new embed for ${guild.guild_name} with ID ${sentMessage.id}`);
-        } catch (err) {
-          console.error(`[Global Webhook] Failed to send new msg for ${guild.guild_name}:`, err.message);
-        }
+      try {
+        const sentMessage = await webhookClient.send({ content: null, embeds: [embed] });
+        console.log(`[Global Webhook] Sent new embed for ${guild.guild_name} with ID ${sentMessage.id}`);
+      } catch (err) {
+        console.error(`[Global Webhook] Failed to send new msg for ${guild.guild_name}:`, err.message);
       }
     }
 
