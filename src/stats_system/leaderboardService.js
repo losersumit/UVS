@@ -117,6 +117,7 @@ async function performLeaderboardUpdate(client, guildId) {
     const { data: topDistance } = await supabase
       .from("player_stats")
       .select("total_distance_km, players!inner(username, display_name, guild_tag, guild_id)")
+      .eq("players.guild_id", guildId)
       .order("total_distance_km", { ascending: false })
       .limit(5);
 
@@ -139,6 +140,7 @@ async function performLeaderboardUpdate(client, guildId) {
     const { data: topTime } = await supabase
       .from("player_stats")
       .select("total_time_minutes, players!inner(username, display_name, guild_tag, guild_id)")
+      .eq("players.guild_id", guildId)
       .order("total_time_minutes", { ascending: false })
       .limit(5);
 
@@ -259,24 +261,24 @@ async function getGlobalLeaderboardFields(client, data, valueFormatter) {
   );
 }
 
-async function updateGlobalWebhook(client) {
+async function updateGlobalWebhook(client, guildId = null) {
   if (globalWebhookUpdating) {
     globalWebhookNeedsUpdate = true;
     return;
   }
   globalWebhookUpdating = true;
   try {
-    await performGlobalWebhookUpdate(client);
+    await performGlobalWebhookUpdate(client, guildId);
   } finally {
     globalWebhookUpdating = false;
     if (globalWebhookNeedsUpdate) {
       globalWebhookNeedsUpdate = false;
-      setTimeout(() => updateGlobalWebhook(client), 5000);
+      setTimeout(() => updateGlobalWebhook(client, guildId), 5000);
     }
   }
 }
 
-async function performGlobalWebhookUpdate(client) {
+async function performGlobalWebhookUpdate(client, guildId = null) {
   const webhookUrl = process.env.GLOBAL_LB_WEBHOOK_URL;
   if (!webhookUrl) return;
 
@@ -286,8 +288,25 @@ async function performGlobalWebhookUpdate(client) {
     // Emojis removed string formatting due to external webhook restrictions
 
     // ───────────── Guilds Leaderboard ─────────────
-    const { data: guildsData } = await supabase.from("approved_guilds").select("guild_id, guild_tag, guild_name, net_worth, embed_color, webhook_id:webhook_id::text, avatar_url, runs");
-    const { data: guildStats } = await supabase.from("player_stats").select("total_time_minutes, total_distance_km, players!inner(guild_id)");
+    let guildsQuery = supabase
+      .from("approved_guilds")
+      .select("guild_id, guild_tag, guild_name, net_worth, embed_color, webhook_id:webhook_id::text, avatar_url, runs");
+
+    if (guildId) {
+      guildsQuery = guildsQuery.eq("guild_id", guildId);
+    }
+
+    const { data: guildsData } = await guildsQuery;
+
+    let guildStatsQuery = supabase
+      .from("player_stats")
+      .select("total_time_minutes, total_distance_km, players!inner(guild_id)");
+
+    if (guildId) {
+      guildStatsQuery = guildStatsQuery.eq("players.guild_id", guildId);
+    }
+
+    const { data: guildStats } = await guildStatsQuery;
 
     if (!guildsData) return;
 

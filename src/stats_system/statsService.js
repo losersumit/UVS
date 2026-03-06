@@ -180,19 +180,21 @@ async function applyRunStats(playerId, ocr, client) {
     throw new Error(`Database Error: Could not save run. ${runError.message}`);
   }
 
+  const { data: player } = await supabase
+    .from("players")
+    .select("guild_id")
+    .eq("id", playerId)
+    .single();
+
+  const affectedGuildId = player?.guild_id || null;
+
   // 3. UPDATE GUILD INCOME
   try {
-    const { data: player } = await supabase
-      .from("players")
-      .select("guild_id")
-      .eq("id", playerId)
-      .single();
-
-    if (player && player.guild_id && income > 0) {
+    if (affectedGuildId && income > 0) {
       const { data: guild } = await supabase
         .from("approved_guilds")
         .select("net_worth, runs")
-        .eq("guild_id", player.guild_id)
+        .eq("guild_id", affectedGuildId)
         .single();
 
       if (guild) {
@@ -201,7 +203,7 @@ async function applyRunStats(playerId, ocr, client) {
         await supabase
           .from("approved_guilds")
           .update({ net_worth: newGuildIncome, runs: newRuns })
-          .eq("guild_id", player.guild_id);
+          .eq("guild_id", affectedGuildId);
       }
     }
   } catch (guildUpdateErr) {
@@ -217,17 +219,19 @@ async function applyRunStats(playerId, ocr, client) {
 
     if (allGuilds) {
       for (const guild of allGuilds) {
-        // Run asynchronously without blocking the user response
+        // Guild leaderboards include global VTC rankings, so all guild boards must refresh
         updateLeaderboard(client, guild.guild_id).catch(err =>
           console.error(`Leaderboard passive update failed for ${guild.guild_id}:`, err)
         );
       }
     }
 
-    // Also trigger the Global Webhook update
-    updateGlobalWebhook(client).catch(err =>
-      console.error("Global webhook trigger failed:", err)
-    );
+    // Only the affected guild's global webhook message should be updated
+    if (affectedGuildId) {
+      updateGlobalWebhook(client, affectedGuildId).catch(err =>
+        console.error(`Global webhook trigger failed for ${affectedGuildId}:`, err)
+      );
+    }
   } catch (err) {
     console.error("Failed to trigger leaderboard updates:", err);
   }
