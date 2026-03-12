@@ -56,18 +56,24 @@ client.once("clientReady", async () => {
     console.error("Global webhook update on restart failed:", err)
   );
 
-  // Refresh all guild leaderboards on Restart
+  // Refresh all guild leaderboards on Restart — edit existing messages only
   (async () => {
     try {
-      const { data: allGuilds } = await supabase.from("approved_guilds").select("guild_id");
-      if (allGuilds) {
-        console.log(`[Leaderboard] Refreshing leaderboards for ${allGuilds.length} guild(s) on restart...`);
+      const { data: allGuilds } = await supabase
+        .from("approved_guilds")
+        .select("guild_id, lb_msg_guilds")
+        .not("lb_msg_guilds", "is", null); // only guilds with an existing leaderboard message
+
+      if (allGuilds && allGuilds.length > 0) {
+        console.log(`[Leaderboard] Editing leaderboards for ${allGuilds.length} guild(s) on restart...`);
         for (const guild of allGuilds) {
           await updateLeaderboard(client, guild.guild_id).catch(err =>
             console.error(`[Leaderboard] Restart refresh failed for ${guild.guild_id}:`, err)
           );
         }
         console.log("[Leaderboard] All guild leaderboards refreshed.");
+      } else {
+        console.log("[Leaderboard] No existing leaderboard messages to refresh on restart.");
       }
     } catch (err) {
       console.error("[Leaderboard] Failed to refresh leaderboards on restart:", err);
