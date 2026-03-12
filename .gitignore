@@ -1,4 +1,4 @@
-
+.env
 
 # Dependencies
 node_modules/
@@ -28,8 +28,10 @@ build/
 *.exe
 *.dll
 
+scripts/
 scripts/leave_server.js
 scripts/list_servers.js
 scripts/spying.js
+scripts/cleanLeaderboardChannels.js
 supabase_tables.json
 approved_guilds_rows.csv

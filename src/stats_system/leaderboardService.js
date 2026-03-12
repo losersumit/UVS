@@ -47,16 +47,19 @@ async function sendOrUpdate(guildId, channel, dbColumn, currentId, embed) {
   // 2. Send New Message
   try {
     const newMsg = await channel.send({ embeds: [embed] });
+    console.log(`[Leaderboard] Sent new embed for ${dbColumn} in guild ${guildId} (msg: ${newMsg.id})`);
 
     // 3. Save new ID to Database immediately
-    await supabase
+    const { error: saveErr } = await supabase
       .from("approved_guilds")
       .update({ [dbColumn]: newMsg.id })
       .eq("guild_id", guildId);
 
+    if (saveErr) console.error(`[Leaderboard] Failed to save ${dbColumn} message ID:`, saveErr.message);
+
     return newMsg.id;
   } catch (err) {
-    console.error(`[Leaderboard] Failed to send/save ${dbColumn}:`, err.message);
+    console.error(`[Leaderboard] Failed to send ${dbColumn} for guild ${guildId}:`, err.message);
     return null;
   }
 }
@@ -94,108 +97,67 @@ async function performLeaderboardUpdate(client, guildId) {
     // 1. Get Config (colors, branding, channel ID)
     const guildConfig = await getGuildConfig(guildId);
 
-    if (!guildConfig.leaderboard_channel_id) return;
-
-    // 2. Get Message IDs directly from DB (ensures persistence across restarts)
-    const { data: guildRow, error } = await supabase
-      .from("approved_guilds")
-      .select("lb_msg_distance, lb_msg_time, lb_msg_score, lb_msg_guilds")
-      .eq("guild_id", guildId)
-      .single();
-
-    if (error || !guildRow) return;
-
-    const channel = await client.channels.fetch(guildConfig.leaderboard_channel_id).catch(() => null);
-    if (!channel) {
-      console.error(`Leaderboard channel not found for guild ${guildId}`);
+    if (!guildConfig.leaderboard_channel_id) {
+      console.warn(`[Leaderboard] Skipping guild ${guildId} — no leaderboard_channel_id set in DB.`);
       return;
     }
 
-    const guild = channel.guild;
-
-    // ───────────── Distance Leaderboard ─────────────
-    const { data: topDistance } = await supabase
-      .from("player_stats")
-      .select("total_distance_km, players!inner(username, display_name, guild_tag, guild_id)")
-      .eq("players.guild_id", guildId)
-      .order("total_distance_km", { ascending: false })
-      .limit(5);
-
-    const distanceFields = await getLeaderboardFields(
-      topDistance || [],
-      guild,
-      (row) => `${Math.round(row.total_distance_km)} km`
-    );
-
-    const distanceEmbed = {
-      title: "🏆 Distance Leaderboard",
-      color: guildConfig.embed_color,
-      thumbnail: guildConfig.thumbnail ? { url: guildConfig.thumbnail } : undefined,
-      fields: distanceFields
-    };
-
-    await sendOrUpdate(guildId, channel, "lb_msg_distance", guildRow.lb_msg_distance, distanceEmbed);
-
-    // ───────────── Time Leaderboard ─────────────
-    const { data: topTime } = await supabase
-      .from("player_stats")
-      .select("total_time_minutes, players!inner(username, display_name, guild_tag, guild_id)")
-      .eq("players.guild_id", guildId)
-      .order("total_time_minutes", { ascending: false })
-      .limit(5);
-
-    const timeFields = await getLeaderboardFields(
-      topTime || [],
-      guild,
-      (row) => formatMinutes(row.total_time_minutes)
-    );
-
-    const timeEmbed = {
-      title: "⏱️ Driving Time Leaderboard",
-      color: guildConfig.embed_color,
-      thumbnail: guildConfig.thumbnail ? { url: guildConfig.thumbnail } : undefined,
-      fields: timeFields
-    };
-
-    await sendOrUpdate(guildId, channel, "lb_msg_time", guildRow.lb_msg_time, timeEmbed);
-
-    // ───────────── Top Guilds Leaderboard ─────────────
-    // Fetch all approved guilds and their current net_worth
-    const { data: guildsData } = await supabase
+    // 2. Get stored message ID (only lb_msg_guilds now — single combined message)
+    const { data: guildRow, error } = await supabase
       .from("approved_guilds")
-      .select("guild_id, guild_tag, net_worth");
+      .select("lb_msg_guilds")
+      .eq("guild_id", guildId)
+      .single();
 
-    const { data: guildStats } = await supabase
-      .from("player_stats")
-      .select(`
-        total_score,
-        total_time_minutes,
-        total_stars,
-        total_distance_km,
-        players!inner(guild_id)
-      `);
+    if (error || !guildRow) {
+      console.error(`[Leaderboard] Failed to fetch guild row for ${guildId}:`, error?.message);
+      return;
+    }
 
+    const channel = await client.channels.fetch(guildConfig.leaderboard_channel_id).catch((err) => {
+      console.error(`[Leaderboard] Cannot fetch channel ${guildConfig.leaderboard_channel_id} for guild ${guildId}:`, err.message);
+      return null;
+    });
+    if (!channel) return;
+
+    // 3. Fetch all data in parallel
+    const [
+      { data: guildsData },
+      { data: guildStats },
+      { data: topDistance },
+      { data: topTime }
+    ] = await Promise.all([
+      supabase.from("approved_guilds").select("guild_id, guild_tag, net_worth"),
+      supabase.from("player_stats").select("total_score, total_time_minutes, total_stars, total_distance_km, players!inner(guild_id)"),
+      supabase.from("player_stats")
+        .select("total_distance_km, players!inner(username, display_name, guild_tag, guild_id)")
+        .eq("players.guild_id", guildId)
+        .order("total_distance_km", { ascending: false })
+        .limit(5),
+      supabase.from("player_stats")
+        .select("total_time_minutes, players!inner(username, display_name, guild_tag, guild_id)")
+        .eq("players.guild_id", guildId)
+        .order("total_time_minutes", { ascending: false })
+        .limit(5)
+    ]);
+
+    // ─── EMBED 1: Top Guilds Leaderboard ───
+    let guildEmbed = null;
     if (guildsData && guildStats) {
       const guildAggregates = new Map();
-
-      // Initialize map with guild data
-      for (const guild of guildsData) {
-        guildAggregates.set(guild.guild_id, {
-          guild_id: guild.guild_id,
-          guild_tag: guild.guild_tag || "Unknown Guild",
-          total_income: Number(guild.net_worth) || 0, // Read net_worth
+      for (const g of guildsData) {
+        guildAggregates.set(g.guild_id, {
+          guild_tag: g.guild_tag || "Unknown Guild",
+          total_income: Number(g.net_worth) || 0,
           total_score: 0,
           total_time_minutes: 0,
           total_stars: 0,
           total_distance_km: 0
         });
       }
-
-      // Aggregate player stats into their respective guilds
       for (const stat of guildStats) {
         const gid = stat.players?.guild_id;
         if (!gid || !guildAggregates.has(gid)) continue;
-
         const agg = guildAggregates.get(gid);
         agg.total_score += Number(stat.total_score || 0);
         agg.total_time_minutes += Number(stat.total_time_minutes || 0);
@@ -203,39 +165,87 @@ async function performLeaderboardUpdate(client, guildId) {
         agg.total_distance_km += Number(stat.total_distance_km || 0);
       }
 
-      // Rank by Income (net_worth)
       const topGuilds = Array.from(guildAggregates.values())
         .sort((a, b) => b.total_income - a.total_income)
         .slice(0, 3);
 
-      if (topGuilds.length > 0) {
-        const guildFields = topGuilds.map((g, i) => {
-          const hours = Math.floor(g.total_time_minutes / 60);
-          const minutes = g.total_time_minutes % 60;
-          return {
-            name: `#${i + 1} ${g.guild_tag}`,
-            value: `Income: **$${Math.round(g.total_income).toLocaleString()}**\n` +
-              `Score: **${Math.round(g.total_score).toLocaleString()}**\n` +
-              `Time: ${hours}h ${minutes}m\n` +
-              `Stars: **${Math.round(g.total_stars).toLocaleString()}**\n` +
-              `Distance: ${Math.round(g.total_distance_km).toLocaleString()} km`,
-            inline: false
-          };
-        });
-
-        const guildEmbed = {
-          title: "🏆 Top Guilds Leaderboard",
-          description: "Ranked by **Net Worth**",
-          color: guildConfig.embed_color,
-          thumbnail: guildConfig.thumbnail ? { url: guildConfig.thumbnail } : undefined,
-          fields: guildFields,
-          footer: {
-            text: `Last updated • ${new Date().toLocaleString()}`
-          }
+      const guildFields = topGuilds.map((g, i) => {
+        const hours = Math.floor(g.total_time_minutes / 60);
+        const mins = g.total_time_minutes % 60;
+        return {
+          name: `#${i + 1} ${g.guild_tag}`,
+          value: `Income: **$${Math.round(g.total_income).toLocaleString()}**\n` +
+            `Score: **${Math.round(g.total_score).toLocaleString()}**\n` +
+            `Time: ${hours}h ${mins}m\n` +
+            `Stars: **${Math.round(g.total_stars).toLocaleString()}**\n` +
+            `Distance: ${Math.round(g.total_distance_km).toLocaleString()} km`,
+          inline: false
         };
+      });
 
-        await sendOrUpdate(guildId, channel, "lb_msg_guilds", guildRow.lb_msg_guilds, guildEmbed);
+      guildEmbed = {
+        title: "🏆 Top Guilds Leaderboard",
+        description: "Ranked by **Net Worth**",
+        color: guildConfig.embed_color,
+        thumbnail: guildConfig.thumbnail ? { url: guildConfig.thumbnail } : undefined,
+        fields: guildFields
+      };
+    }
+
+    // ─── EMBED 2: Distance Leaderboard ───
+    const distanceFields = await getLeaderboardFields(
+      topDistance || [],
+      channel.guild,
+      (row) => `${Math.round(row.total_distance_km)} km`
+    );
+    const distanceEmbed = {
+      title: "🛤️ Distance Leaderboard",
+      color: guildConfig.embed_color,
+      fields: distanceFields
+    };
+
+    // ─── EMBED 3: Time Leaderboard — footer goes here (last embed) ───
+    const timeFields = await getLeaderboardFields(
+      topTime || [],
+      channel.guild,
+      (row) => formatMinutes(row.total_time_minutes)
+    );
+    const timeEmbed = {
+      title: "⏱️ Driving Time Leaderboard",
+      color: guildConfig.embed_color,
+      fields: timeFields,
+      footer: { text: `Managed by NMC • Last updated • ${new Date().toLocaleString()}` }
+    };
+
+    // 4. Combine into one message: Guild LB → Distance → Time
+    const embeds = [
+      ...(guildEmbed ? [guildEmbed] : []),
+      distanceEmbed,
+      timeEmbed
+    ];
+
+    // 5. Edit existing message or send new one — stored under lb_msg_guilds
+    const currentId = guildRow.lb_msg_guilds;
+    if (currentId) {
+      try {
+        const msg = await channel.messages.fetch(currentId);
+        await msg.edit({ embeds });
+        return;
+      } catch (err) {
+        console.warn(`[Leaderboard] Message ${currentId} not found for guild ${guildId}. Sending new...`);
       }
+    }
+
+    try {
+      const newMsg = await channel.send({ embeds });
+      console.log(`[Leaderboard] Sent combined leaderboard for guild ${guildId} (msg: ${newMsg.id})`);
+      const { error: saveErr } = await supabase
+        .from("approved_guilds")
+        .update({ lb_msg_guilds: newMsg.id })
+        .eq("guild_id", guildId);
+      if (saveErr) console.error(`[Leaderboard] Failed to save lb_msg_guilds for ${guildId}:`, saveErr.message);
+    } catch (err) {
+      console.error(`[Leaderboard] Failed to send combined leaderboard for ${guildId}:`, err.message);
     }
 
   } catch (err) {
@@ -244,6 +254,7 @@ async function performLeaderboardUpdate(client, guildId) {
 }
 
 // ─────────────────────────────────────────────────────────────
+
 // GLOBAL WEBHOOK SUPPORT
 // ─────────────────────────────────────────────────────────────
 const { WebhookClient } = require('discord.js');
@@ -374,6 +385,14 @@ async function performGlobalWebhookUpdate(client, guildId = null) {
       try {
         const sentMessage = await webhookClient.send({ content: null, embeds: [embed] });
         console.log(`[Global Webhook] Sent new embed for ${guild.guild_name} with ID ${sentMessage.id}`);
+
+        // Save the new message ID so future updates can edit it instead of re-sending
+        const { error: saveErr } = await supabase
+          .from("approved_guilds")
+          .update({ webhook_id: sentMessage.id })
+          .eq("guild_id", guild.guild_id);
+
+        if (saveErr) console.error(`[Global Webhook] Failed to save webhook_id for ${guild.guild_name}:`, saveErr.message);
       } catch (err) {
         console.error(`[Global Webhook] Failed to send new msg for ${guild.guild_name}:`, err.message);
       }
