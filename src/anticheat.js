@@ -10,7 +10,7 @@
 
 const LIMITS = {
   MAX_AVG_SPEED: 180,          // km/h (Loose cap to allow for downhill/bugs)
-  MAX_DISTANCE_PER_RUN: 720,  // km
+  MAX_DISTANCE_PER_RUN: 730,  // km
   MAX_INCOME_PER_RUN: 45000,  // game currency per run
   MAX_INCOME_PER_KM: 120,     // game currency per km
 };
@@ -58,9 +58,11 @@ function validateRun(ocr, prevStats) {
     return reject(`Income per km ${incomePerKm.toFixed(0)} exceeds limit of ${LIMITS.MAX_INCOME_PER_KM} . If you think this is a bug, please direct message to @losersumit on discord or join the server from bot's Bio.`);
   }
 
-  // Progression Check (Anti-Reverse)
-  if (level < prevLevel) {
-    return reject(`Level regression detected (Previous: ${prevLevel}, Current: ${level})`);
+  // Progression Check — allow 1 level of tolerance to handle AI OCR misreads
+  // e.g. if AI previously read level 34 when it was actually 33, the user's next
+  // screenshot at level 33 is still valid and should not be rejected.
+  if (level < prevLevel - 1) {
+    return reject(`Level regression detected (DB level: ${prevLevel}, Screenshot level: ${level})`);
   }
 
   return { ok: true };
