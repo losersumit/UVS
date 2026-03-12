@@ -25,7 +25,7 @@ const { Client, GatewayIntentBits } = require('discord.js');
 const { registerScreenshotListener } = require("./src/stats_system/screenshotListener");
 const { supabase } = require("./src/stats_system/supabase");
 const { registerLeaderboardRealtime } = require("./src/stats_system/realtimeLeaderboard");
-const { updateGlobalWebhook } = require("./src/stats_system/leaderboardService");
+const { updateLeaderboard, updateGlobalWebhook } = require("./src/stats_system/leaderboardService");
 const { registerDailyInspector, runDailyInspection } = require("./src/stats_system/dailyInspector");
 const { isOwner } = require("./src/owner");
 const { isGuildApproved } = require("./src/guildGuard");
@@ -42,7 +42,7 @@ const client = new Client({
 // Register Modules
 registerScreenshotListener(client);
 
-client.once("ready", async () => {
+client.once("clientReady", async () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
 
   // Register Realtime Listener
@@ -55,6 +55,24 @@ client.once("ready", async () => {
   updateGlobalWebhook(client).catch(err =>
     console.error("Global webhook update on restart failed:", err)
   );
+
+  // Refresh all guild leaderboards on Restart
+  (async () => {
+    try {
+      const { data: allGuilds } = await supabase.from("approved_guilds").select("guild_id");
+      if (allGuilds) {
+        console.log(`[Leaderboard] Refreshing leaderboards for ${allGuilds.length} guild(s) on restart...`);
+        for (const guild of allGuilds) {
+          await updateLeaderboard(client, guild.guild_id).catch(err =>
+            console.error(`[Leaderboard] Restart refresh failed for ${guild.guild_id}:`, err)
+          );
+        }
+        console.log("[Leaderboard] All guild leaderboards refreshed.");
+      }
+    } catch (err) {
+      console.error("[Leaderboard] Failed to refresh leaderboards on restart:", err);
+    }
+  })();
 
   // Register Commands
   const commands = [
