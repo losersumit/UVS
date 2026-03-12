@@ -141,7 +141,7 @@ async function performLeaderboardUpdate(client, guildId) {
         .limit(5)
     ]);
 
-    // ─── EMBED 1: Top Guilds Leaderboard ───
+    // ─── EMBED 1: This Guild's VTC Card (like /myvtc) ───
     let guildEmbed = null;
     if (guildsData && guildStats) {
       const guildAggregates = new Map();
@@ -171,37 +171,34 @@ async function performLeaderboardUpdate(client, guildId) {
         agg.member_count += 1;
       }
 
+      // Sort all guilds to determine this guild's global rank
       const sortedGuilds = Array.from(guildAggregates.values())
         .sort((a, b) => b.total_income - a.total_income);
 
-      const topGuilds = sortedGuilds.slice(0, 3);
+      const myRank = sortedGuilds.findIndex(g => g.guild_id === guildId) + 1;
       const totalGuilds = sortedGuilds.length;
+      const me = guildAggregates.get(guildId);
 
-      const guildFields = topGuilds.map((g, i) => {
-        const rank = i + 1;
-        const hours = Math.floor(g.total_time_minutes / 60);
-        const mins = g.total_time_minutes % 60;
-        return {
-          name: `#${rank} 🏢 ${g.guild_tag} | ${g.guild_name}`,
-          value: `**Global VTC Rank: #${rank}** out of ${totalGuilds}\n` +
-            `👥 Active Drivers: **${g.member_count}**\n` +
-            `💰 Income: **$${Math.round(g.total_income).toLocaleString()}**\n` +
-            `🏆 Score: **${Math.round(g.total_score).toLocaleString()}**\n` +
-            `🛤️ Distance: **${Math.round(g.total_distance_km).toLocaleString()} km**\n` +
-            `⏱️ Time: **${hours}h ${mins}m**\n` +
-            `⭐ Stars: **${Math.round(g.total_stars).toLocaleString()}**\n` +
-            `✅ Clean Deliveries: **${g.clean_deliveries}**`,
-          inline: false
+      if (me) {
+        const hours = Math.floor(me.total_time_minutes / 60);
+        const mins = me.total_time_minutes % 60;
+
+        guildEmbed = {
+          title: `🏢 ${me.guild_tag} | ${me.guild_name}`,
+          description: `**Global VTC Rank: #${myRank}** out of ${totalGuilds}`,
+          color: guildConfig.embed_color,
+          thumbnail: guildConfig.thumbnail ? { url: guildConfig.thumbnail } : undefined,
+          fields: [
+            { name: "👥 Active Drivers", value: `${me.member_count}`, inline: true },
+            { name: "💰 Total Income", value: `$${Math.round(me.total_income).toLocaleString()}`, inline: true },
+            { name: "🏆 Total Score", value: `${Math.round(me.total_score).toLocaleString()}`, inline: true },
+            { name: "🛤️ Total Distance", value: `${Math.round(me.total_distance_km).toLocaleString()} km`, inline: true },
+            { name: "⏱️ Driving Time", value: `${hours}h ${mins}m`, inline: true },
+            { name: "⭐ Total Stars", value: `${Math.round(me.total_stars).toLocaleString()}`, inline: true },
+            { name: "✅ Clean Deliveries", value: `${me.clean_deliveries}`, inline: true }
+          ]
         };
-      });
-
-      guildEmbed = {
-        title: "🏆 Top Guilds Leaderboard",
-        description: "Ranked by **Net Worth**",
-        color: guildConfig.embed_color,
-        thumbnail: guildConfig.thumbnail ? { url: guildConfig.thumbnail } : undefined,
-        fields: guildFields
-      };
+      }
     }
 
     // ─── EMBED 2: Distance Leaderboard ───
