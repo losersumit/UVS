@@ -127,8 +127,8 @@ async function performLeaderboardUpdate(client, guildId) {
       { data: topDistance },
       { data: topTime }
     ] = await Promise.all([
-      supabase.from("approved_guilds").select("guild_id, guild_tag, net_worth"),
-      supabase.from("player_stats").select("total_score, total_time_minutes, total_stars, total_distance_km, players!inner(guild_id)"),
+      supabase.from("approved_guilds").select("guild_id, guild_tag, guild_name, net_worth"),
+      supabase.from("player_stats").select("total_score, total_time_minutes, total_stars, total_distance_km, clean_deliveries, players!inner(guild_id)"),
       supabase.from("player_stats")
         .select("total_distance_km, players!inner(username, display_name, guild_tag, guild_id)")
         .eq("players.guild_id", guildId)
@@ -147,12 +147,16 @@ async function performLeaderboardUpdate(client, guildId) {
       const guildAggregates = new Map();
       for (const g of guildsData) {
         guildAggregates.set(g.guild_id, {
+          guild_id: g.guild_id,
           guild_tag: g.guild_tag || "Unknown Guild",
+          guild_name: g.guild_name || "Unknown Server",
           total_income: Number(g.net_worth) || 0,
           total_score: 0,
           total_time_minutes: 0,
           total_stars: 0,
-          total_distance_km: 0
+          total_distance_km: 0,
+          clean_deliveries: 0,
+          member_count: 0
         });
       }
       for (const stat of guildStats) {
@@ -163,22 +167,30 @@ async function performLeaderboardUpdate(client, guildId) {
         agg.total_time_minutes += Number(stat.total_time_minutes || 0);
         agg.total_stars += Number(stat.total_stars || 0);
         agg.total_distance_km += Number(stat.total_distance_km || 0);
+        agg.clean_deliveries += Number(stat.clean_deliveries || 0);
+        agg.member_count += 1;
       }
 
-      const topGuilds = Array.from(guildAggregates.values())
-        .sort((a, b) => b.total_income - a.total_income)
-        .slice(0, 3);
+      const sortedGuilds = Array.from(guildAggregates.values())
+        .sort((a, b) => b.total_income - a.total_income);
+
+      const topGuilds = sortedGuilds.slice(0, 3);
+      const totalGuilds = sortedGuilds.length;
 
       const guildFields = topGuilds.map((g, i) => {
+        const rank = i + 1;
         const hours = Math.floor(g.total_time_minutes / 60);
         const mins = g.total_time_minutes % 60;
         return {
-          name: `#${i + 1} ${g.guild_tag}`,
-          value: `Income: **$${Math.round(g.total_income).toLocaleString()}**\n` +
-            `Score: **${Math.round(g.total_score).toLocaleString()}**\n` +
-            `Time: ${hours}h ${mins}m\n` +
-            `Stars: **${Math.round(g.total_stars).toLocaleString()}**\n` +
-            `Distance: ${Math.round(g.total_distance_km).toLocaleString()} km`,
+          name: `#${rank} 🏢 ${g.guild_tag} | ${g.guild_name}`,
+          value: `**Global VTC Rank: #${rank}** out of ${totalGuilds}\n` +
+            `👥 Active Drivers: **${g.member_count}**\n` +
+            `💰 Income: **$${Math.round(g.total_income).toLocaleString()}**\n` +
+            `🏆 Score: **${Math.round(g.total_score).toLocaleString()}**\n` +
+            `🛤️ Distance: **${Math.round(g.total_distance_km).toLocaleString()} km**\n` +
+            `⏱️ Time: **${hours}h ${mins}m**\n` +
+            `⭐ Stars: **${Math.round(g.total_stars).toLocaleString()}**\n` +
+            `✅ Clean Deliveries: **${g.clean_deliveries}**`,
           inline: false
         };
       });
