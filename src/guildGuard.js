@@ -14,16 +14,21 @@ const { supabase } = require("./stats_system/supabase");
 async function isGuildApproved(guildId) {
   const { data, error } = await supabase
     .from("approved_guilds")
-    .select("guild_id")
+    .select("guild_id, is_suspended")
     .eq("guild_id", guildId)
     .maybeSingle();
 
-  if (error) {
-    console.error("Guild approval check failed:", error);
+  if (error || !data) {
+    if (error) console.error("Guild approval check failed:", error);
     return false;
   }
 
-  return !!data;
+  // Suspended guilds should not be able to use the bot
+  if (data.is_suspended) {
+    return false;
+  }
+
+  return true;
 }
 
 module.exports = { isGuildApproved };
