@@ -90,6 +90,8 @@ client.once("clientReady", async () => {
     { name: "bestdrivers", description: "View best drivers by clean deliveries", options: [{ name: "global", description: "Show all approved VTC members", type: 5, required: false }] },
     { name: "myvtc", description: "View complete stats and global rank for your current VTC" },
     { name: "clearstats", description: "Clear a user's stats (Owner Only)", options: [{ name: "user", description: "User to clear", type: 6, required: true }] },
+    { name: "suspendvtc", description: "Suspend a VTC from leaderboards (Owner Only)", options: [{ name: "guild_id", type: 3, description: "ID of the server", required: true }] },
+    { name: "restorevtc", description: "Restore a suspended VTC to leaderboards (Owner Only)", options: [{ name: "guild_id", type: 3, description: "ID of the server", required: true }] },
     { name: "help", description: "Show bot instructions and commands" }
   ];
 
@@ -134,9 +136,12 @@ client.on("interactionCreate", async (interaction) => {
     const minutes = (stats.total_time_minutes || 0) % 60;
 
     // Get all player stats in one query to calculate ranks efficiently
-    const { data: allStats } = await supabase
+    const { data: allStatsRaw } = await supabase
       .from("player_stats")
-      .select("current_level, total_distance_km, total_time_minutes, best_avg_speed_kmph, total_score, total_stars, clean_deliveries, total_damage_penalty, total_time_penalty");
+      .select("current_level, total_distance_km, total_time_minutes, best_avg_speed_kmph, total_score, total_stars, clean_deliveries, total_damage_penalty, total_time_penalty, players!inner(guild_id)");
+
+    const activeIds = (await supabase.from("approved_guilds").select("guild_id").eq("is_suspended", false)).data?.map(g => g.guild_id) || [];
+    const allStats = (allStatsRaw || []).filter(s => activeIds.includes(s.players?.guild_id));
 
     // Calculate ranks
     const userLevel = stats.current_level || 0;
@@ -195,6 +200,9 @@ client.on("interactionCreate", async (interaction) => {
 
     if (!isGlobal) {
       query = query.eq("players.guild_id", interaction.guild.id);
+    } else {
+      const activeIds = (await supabase.from("approved_guilds").select("guild_id").eq("is_suspended", false)).data?.map(g => g.guild_id) || [];
+      if (activeIds.length > 0) query = query.in("players.guild_id", activeIds);
     }
 
     const { data: levelStats } = await query;
@@ -235,6 +243,9 @@ client.on("interactionCreate", async (interaction) => {
 
     if (!isGlobal) {
       query = query.eq("players.guild_id", interaction.guild.id);
+    } else {
+      const activeIds = (await supabase.from("approved_guilds").select("guild_id").eq("is_suspended", false)).data?.map(g => g.guild_id) || [];
+      if (activeIds.length > 0) query = query.in("players.guild_id", activeIds);
     }
 
     const { data: speedStats } = await query;
@@ -275,6 +286,9 @@ client.on("interactionCreate", async (interaction) => {
 
     if (!isGlobal) {
       query = query.eq("players.guild_id", interaction.guild.id);
+    } else {
+      const activeIds = (await supabase.from("approved_guilds").select("guild_id").eq("is_suspended", false)).data?.map(g => g.guild_id) || [];
+      if (activeIds.length > 0) query = query.in("players.guild_id", activeIds);
     }
 
     const { data: distanceStats } = await query;
@@ -315,6 +329,9 @@ client.on("interactionCreate", async (interaction) => {
 
     if (!isGlobal) {
       query = query.eq("players.guild_id", interaction.guild.id);
+    } else {
+      const activeIds = (await supabase.from("approved_guilds").select("guild_id").eq("is_suspended", false)).data?.map(g => g.guild_id) || [];
+      if (activeIds.length > 0) query = query.in("players.guild_id", activeIds);
     }
 
     const { data: timeStats } = await query;
@@ -353,7 +370,7 @@ client.on("interactionCreate", async (interaction) => {
       { data: guildsData },
       { data: guildStats }
     ] = await Promise.all([
-      supabase.from("approved_guilds").select("guild_id, guild_tag, guild_name, net_worth"),
+      supabase.from("approved_guilds").select("guild_id, guild_tag, guild_name, net_worth").eq("is_suspended", false),
       supabase.from("player_stats").select("total_score, total_time_minutes, total_stars, total_distance_km, clean_deliveries, players!inner(guild_id)")
     ]);
 
@@ -448,6 +465,7 @@ client.on("interactionCreate", async (interaction) => {
     const { data: guildsData } = await supabase
       .from("approved_guilds")
       .select("guild_id, guild_tag, guild_name")
+      .eq("is_suspended", false)
       .order("guild_tag", { ascending: true });
 
     // 3. Format the list: "[TAG] Name"
@@ -496,6 +514,9 @@ client.on("interactionCreate", async (interaction) => {
 
     if (!isGlobal) {
       query = query.eq("players.guild_id", interaction.guild.id);
+    } else {
+      const activeIds = (await supabase.from("approved_guilds").select("guild_id").eq("is_suspended", false)).data?.map(g => g.guild_id) || [];
+      if (activeIds.length > 0) query = query.in("players.guild_id", activeIds);
     }
 
     const { data: allStats } = await query;
@@ -552,6 +573,9 @@ client.on("interactionCreate", async (interaction) => {
 
     if (!isGlobal) {
       query = query.eq("players.guild_id", interaction.guild.id);
+    } else {
+      const activeIds = (await supabase.from("approved_guilds").select("guild_id").eq("is_suspended", false)).data?.map(g => g.guild_id) || [];
+      if (activeIds.length > 0) query = query.in("players.guild_id", activeIds);
     }
 
     const { data: bestStats } = await query;
@@ -609,6 +633,26 @@ client.on("interactionCreate", async (interaction) => {
     }).eq("player_id", player.id);
 
     return interaction.editReply(`✅ Cleared stats for **${target.username}**`);
+  }
+
+  // COMMAND: SUSPEND VTC
+  if (interaction.commandName === "suspendvtc") {
+    if (!isOwner(interaction.user.id)) return interaction.reply({ content: "❌ Permission denied.", ephemeral: true });
+    await interaction.deferReply({ ephemeral: true });
+    const targetId = interaction.options.getString("guild_id");
+    const { error } = await supabase.from("approved_guilds").update({ is_suspended: true }).eq("guild_id", targetId);
+    if (error) return interaction.editReply("❌ Failed to suspend VTC.");
+    return interaction.editReply(`✅ Suspended VTC **${targetId}** from leaderboards.`);
+  }
+
+  // COMMAND: RESTORE VTC
+  if (interaction.commandName === "restorevtc") {
+    if (!isOwner(interaction.user.id)) return interaction.reply({ content: "❌ Permission denied.", ephemeral: true });
+    await interaction.deferReply({ ephemeral: true });
+    const targetId = interaction.options.getString("guild_id");
+    const { error } = await supabase.from("approved_guilds").update({ is_suspended: false }).eq("guild_id", targetId);
+    if (error) return interaction.editReply("❌ Failed to restore VTC.");
+    return interaction.editReply(`✅ Restored VTC **${targetId}** to leaderboards.`);
   }
 });
 

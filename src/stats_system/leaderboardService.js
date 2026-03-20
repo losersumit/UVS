@@ -120,21 +120,29 @@ async function performLeaderboardUpdate(client, guildId) {
     });
     if (!channel) return;
 
-    // 3. Fetch all data in parallel
+    // 3. Fetch active guilds first
+    const { data: activeGuildsRaw } = await supabase.from("approved_guilds").select("guild_id").eq("is_suspended", false);
+    const activeGuildIds = activeGuildsRaw ? activeGuildsRaw.map(g => g.guild_id) : [];
+
+    if (activeGuildIds.length === 0) return; // Nothing to show
+
+    // 4. Fetch all data in parallel
     const [
       { data: guildsData },
       { data: guildStats },
       { data: topDistance },
       { data: topTime }
     ] = await Promise.all([
-      supabase.from("approved_guilds").select("guild_id, guild_tag, guild_name, net_worth"),
+      supabase.from("approved_guilds").select("guild_id, guild_tag, guild_name, net_worth").eq("is_suspended", false),
       supabase.from("player_stats").select("total_score, total_time_minutes, total_stars, total_distance_km, clean_deliveries, players!inner(guild_id)"),
       supabase.from("player_stats")
         .select("total_distance_km, players!inner(username, display_name, guild_tag, guild_id)")
+        .in("players.guild_id", activeGuildIds)
         .order("total_distance_km", { ascending: false })
         .limit(5),
       supabase.from("player_stats")
         .select("total_time_minutes, players!inner(username, display_name, guild_tag, guild_id)")
+        .in("players.guild_id", activeGuildIds)
         .order("total_time_minutes", { ascending: false })
         .limit(5)
     ]);
@@ -288,7 +296,8 @@ async function performGlobalWebhookUpdate(client, guildId = null) {
     // ───────────── Guilds Leaderboard ─────────────
     let guildsQuery = supabase
       .from("approved_guilds")
-      .select("guild_id, guild_tag, guild_name, net_worth, embed_color, webhook_id:webhook_id::text, avatar_url, runs");
+      .select("guild_id, guild_tag, guild_name, net_worth, embed_color, webhook_id:webhook_id::text, avatar_url, runs")
+      .eq("is_suspended", false);
 
     if (guildId) {
       guildsQuery = guildsQuery.eq("guild_id", guildId);
