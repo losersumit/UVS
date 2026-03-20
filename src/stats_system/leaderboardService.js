@@ -188,13 +188,16 @@ async function performLeaderboardUpdate(client, guildId) {
     }
 
     // ─── EMBED 2: Distance Leaderboard ───
+    const myGuildRow = guildsData?.find(g => g.guild_id === guildId);
+    const myTag = myGuildRow?.guild_tag ? `[${myGuildRow.guild_tag}]` : "";
+
     const distanceFields = await getLeaderboardFields(
       topDistance || [],
       channel.guild,
       (row) => `${Math.round(row.total_distance_km)} km`
     );
     const distanceEmbed = {
-      title: "🛤️ Distance Leaderboard",
+      title: `🛤️ Distance Leaderboard ${myTag}`.trim(),
       color: guildConfig.embed_color,
       fields: distanceFields
     };
@@ -206,7 +209,7 @@ async function performLeaderboardUpdate(client, guildId) {
       (row) => formatMinutes(row.total_time_minutes)
     );
     const timeEmbed = {
-      title: "⏱️ Driving Time Leaderboard",
+      title: `⏱️ Driving Time Leaderboard ${myTag}`.trim(),
       color: guildConfig.embed_color,
       fields: timeFields,
       footer: { text: "Managed by NMC • For viewing global leaderboards, please use bot commands." }
