@@ -61,8 +61,7 @@ client.once("clientReady", async () => {
     try {
       const { data: allGuilds } = await supabase
         .from("approved_guilds")
-        .select("guild_id, lb_msg_guilds")
-        .not("lb_msg_guilds", "is", null); // only guilds with an existing leaderboard message
+        .select("guild_id, lb_msg_guilds");
 
       if (allGuilds && allGuilds.length > 0) {
         console.log(`[Leaderboard] Editing leaderboards for ${allGuilds.length} guild(s) on restart...`);
@@ -89,7 +88,7 @@ client.once("clientReady", async () => {
     { name: "timelb", description: "View top drivers by total time", options: [{ name: "global", description: "Show all approved VTC members", type: 5, required: false }] },
     { name: "worstdrivers", description: "View worst drivers by penalties", options: [{ name: "global", description: "Show all approved VTC members", type: 5, required: false }] },
     { name: "bestdrivers", description: "View best drivers by clean deliveries", options: [{ name: "global", description: "Show all approved VTC members", type: 5, required: false }] },
-    { name: "vtclb", description: "View complete stats and global rank for your current VTC" },
+    { name: "myvtc", description: "View complete stats and global rank for your current VTC" },
     { name: "clearstats", description: "Clear a user's stats (Owner Only)", options: [{ name: "user", description: "User to clear", type: 6, required: true }] },
     { name: "help", description: "Show bot instructions and commands" }
   ];
@@ -344,15 +343,19 @@ client.on("interactionCreate", async (interaction) => {
     });
   }
 
-  // COMMAND: VTCLB
-  if (interaction.commandName === "vtclb") {
+  // COMMAND: MYVTC
+  if (interaction.commandName === "myvtc") {
     await interaction.deferReply();
     const guildId = interaction.guild.id;
 
-    // 1. Get all guilds to calculate rank
-    const { data: guildsData } = await supabase
-      .from("approved_guilds")
-      .select("guild_id, guild_tag, guild_name, net_worth");
+    // 1. Fetch all data needed to calculate global rank for guilds
+    const [
+      { data: guildsData },
+      { data: guildStats }
+    ] = await Promise.all([
+      supabase.from("approved_guilds").select("guild_id, guild_tag, guild_name, net_worth"),
+      supabase.from("player_stats").select("total_score, total_time_minutes, total_stars, total_distance_km, clean_deliveries, players!inner(guild_id)")
+    ]);
 
     if (!guildsData) {
       return interaction.editReply("❌ Failed to fetch VTC data.");
@@ -363,59 +366,64 @@ client.on("interactionCreate", async (interaction) => {
       return interaction.editReply("❌ This server is not an approved VTC.");
     }
 
-    // 2. Count active drivers per guild (from players table — lighter query)
-    const { data: playerRows } = await supabase
-      .from("players")
-      .select("guild_id");
+    const guildAggregates = new Map();
+    for (const g of guildsData) {
+      guildAggregates.set(g.guild_id, {
+        guild_id: g.guild_id,
+        guild_tag: g.guild_tag || "Unknown Guild",
+        guild_name: g.guild_name || "Unknown Server",
+        net_worth: Number(g.net_worth) || 0,
+        total_score: 0,
+        total_time_minutes: 0,
+        total_stars: 0,
+        total_distance_km: 0,
+        clean_deliveries: 0,
+        member_count: 0
+      });
+    }
 
-    const memberCounts = new Map();
-    if (playerRows) {
-      for (const p of playerRows) {
-        if (!p.guild_id) continue;
-        memberCounts.set(p.guild_id, (memberCounts.get(p.guild_id) || 0) + 1);
+    if (guildStats) {
+      for (const stat of guildStats) {
+        const gid = stat.players?.guild_id;
+        if (!gid || !guildAggregates.has(gid)) continue;
+        const agg = guildAggregates.get(gid);
+        agg.total_score += Number(stat.total_score || 0);
+        agg.total_time_minutes += Number(stat.total_time_minutes || 0);
+        agg.total_stars += Number(stat.total_stars || 0);
+        agg.total_distance_km += Number(stat.total_distance_km || 0);
+        agg.clean_deliveries += Number(stat.clean_deliveries || 0);
+        agg.member_count += 1;
       }
     }
 
-    // 3. Sort all guilds by net worth
-    const sorted = guildsData
-      .map(g => ({
-        guild_id: g.guild_id,
-        guild_tag: g.guild_tag || "Unknown",
-        guild_name: g.guild_name || interaction.client.guilds.cache.get(g.guild_id)?.name || "Unknown Server",
-        total_income: Number(g.net_worth) || 0,
-        member_count: memberCounts.get(g.guild_id) || 0
-      }))
-      .sort((a, b) => b.total_income - a.total_income);
+    // Sort all guilds to determine this guild's global rank
+    const sortedGuilds = Array.from(guildAggregates.values())
+      .sort((a, b) => b.net_worth - a.net_worth);
 
-    const myRank = sorted.findIndex(g => g.guild_id === guildId) + 1;
-    const top5 = sorted.slice(0, 5);
-    const isInTop5 = myRank <= 5;
+    const myRank = sortedGuilds.findIndex(g => g.guild_id === guildId) + 1;
+    const totalGuilds = sortedGuilds.length;
+    const me = guildAggregates.get(guildId);
 
     const guildConfig = await getGuildConfig(guildId);
 
-    // 4. Build top 5 fields
-    const fields = top5.map((g, i) => ({
-      name: `#${i + 1} ${g.guild_tag} | ${g.guild_name}`,
-      value: `💰 **$${Math.round(g.total_income).toLocaleString()}** net worth  •  👥 ${g.member_count} drivers`,
-      inline: false
-    }));
-
-    // 5. Only show "Your Rank" if outside top 5
-    if (!isInTop5) {
-      const mine = sorted[myRank - 1];
-      fields.push(
-        { name: "─────────────────────", value: `**Your Rank: #${myRank}** out of ${sorted.length}`, inline: false },
-        { name: `${mine.guild_tag} | ${mine.guild_name}`, value: `💰 **$${Math.round(mine.total_income).toLocaleString()}** net worth  •  👥 ${mine.member_count} drivers`, inline: false }
-      );
-    }
+    const hours = Math.floor(me.total_time_minutes / 60);
+    const mins = me.total_time_minutes % 60;
 
     await interaction.editReply({
       embeds: [{
-        title: "🏆 VTC Global Leaderboard",
-        description: `Top **${top5.length}** VTCs ranked by **Net Worth** • ${sorted.length} approved VTCs total`,
+        title: `🏢 ${me.guild_tag} | ${me.guild_name}`,
+        description: `**Global VTC Rank: #${myRank}** out of ${totalGuilds}`,
         color: guildConfig.embed_color,
         thumbnail: guildConfig.thumbnail ? { url: guildConfig.thumbnail } : undefined,
-        fields,
+        fields: [
+          { name: "👥 Active Drivers", value: `${me.member_count}`, inline: true },
+          { name: "💰 Net Worth", value: `$${Math.round(me.net_worth).toLocaleString()}`, inline: true },
+          { name: "🏆 Total Score", value: `${Math.round(me.total_score).toLocaleString()}`, inline: true },
+          { name: "🛤️ Total Distance", value: `${Math.round(me.total_distance_km).toLocaleString()} km`, inline: true },
+          { name: "⏱️ Driving Time", value: `${hours}h ${mins}m`, inline: true },
+          { name: "⭐ Total Stars", value: `${Math.round(me.total_stars).toLocaleString()}`, inline: true },
+          { name: "✅ Clean Deliveries", value: `${me.clean_deliveries}`, inline: true }
+        ],
         footer: { text: "Managed by NMC" }
       }]
     });
@@ -462,7 +470,7 @@ client.on("interactionCreate", async (interaction) => {
         { name: "⏱️ /timelb [global]", value: "Rank by Total Time Driven. Default is current server only. Set `global: True` to include all servers.", inline: true },
         { name: "⭐ /bestdrivers [global]", value: "Rank by Clean Deliveries. Default is current server only. Set `global: True` to include all servers.", inline: true },
         { name: "🚨 /worstdrivers [global]", value: "Rank by total penalties. Default is current server only. Set `global: True` to include all servers.", inline: true },
-        { name: "🏢 /vtclb", value: "View complete stats and global rank for your VTC.", inline: true },
+        { name: "🏢 /myvtc", value: "View complete stats and global rank for your VTC.", inline: true },
         { name: "🛠️ /clearstats", value: "**(Owner Only)** Reset a user's stats completely.", inline: true },
         // 👇 The new field listing all approved guilds inside the embed 👇
         { name: "✅ Approved VTCs", value: guildList || "No VTCs found.", inline: false },

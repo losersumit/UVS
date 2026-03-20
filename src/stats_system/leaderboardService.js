@@ -131,74 +131,52 @@ async function performLeaderboardUpdate(client, guildId) {
       supabase.from("player_stats").select("total_score, total_time_minutes, total_stars, total_distance_km, clean_deliveries, players!inner(guild_id)"),
       supabase.from("player_stats")
         .select("total_distance_km, players!inner(username, display_name, guild_tag, guild_id)")
-        .eq("players.guild_id", guildId)
         .order("total_distance_km", { ascending: false })
         .limit(5),
       supabase.from("player_stats")
         .select("total_time_minutes, players!inner(username, display_name, guild_tag, guild_id)")
-        .eq("players.guild_id", guildId)
         .order("total_time_minutes", { ascending: false })
         .limit(5)
     ]);
 
-    // ─── EMBED 1: This Guild's VTC Card (like /myvtc) ───
+    // ─── EMBED 1: VTC Global Leaderboard (Top 3) ───
     let guildEmbed = null;
     if (guildsData && guildStats) {
       const guildAggregates = new Map();
       for (const g of guildsData) {
         guildAggregates.set(g.guild_id, {
           guild_id: g.guild_id,
-          guild_tag: g.guild_tag || "Unknown Guild",
+          guild_tag: g.guild_tag || "Unknown",
           guild_name: g.guild_name || "Unknown Server",
-          total_income: Number(g.net_worth) || 0,
-          total_score: 0,
-          total_time_minutes: 0,
-          total_stars: 0,
-          total_distance_km: 0,
-          clean_deliveries: 0,
+          net_worth: Number(g.net_worth) || 0,
           member_count: 0
         });
       }
       for (const stat of guildStats) {
         const gid = stat.players?.guild_id;
         if (!gid || !guildAggregates.has(gid)) continue;
-        const agg = guildAggregates.get(gid);
-        agg.total_score += Number(stat.total_score || 0);
-        agg.total_time_minutes += Number(stat.total_time_minutes || 0);
-        agg.total_stars += Number(stat.total_stars || 0);
-        agg.total_distance_km += Number(stat.total_distance_km || 0);
-        agg.clean_deliveries += Number(stat.clean_deliveries || 0);
-        agg.member_count += 1;
+        guildAggregates.get(gid).member_count += 1;
       }
 
-      // Sort all guilds to determine this guild's global rank
+      // Sort all guilds
       const sortedGuilds = Array.from(guildAggregates.values())
-        .sort((a, b) => b.total_income - a.total_income);
+        .sort((a, b) => b.net_worth - a.net_worth);
 
-      const myRank = sortedGuilds.findIndex(g => g.guild_id === guildId) + 1;
-      const totalGuilds = sortedGuilds.length;
-      const me = guildAggregates.get(guildId);
+      const top3 = sortedGuilds.slice(0, 3);
+      
+      const fields = top3.map((g, i) => ({
+        name: `#${i + 1} ${g.guild_tag} | ${g.guild_name}`,
+        value: `💰 **$${Math.round(g.net_worth).toLocaleString()}** Net Worth  •  👥 ${g.member_count} drivers`,
+        inline: false
+      }));
 
-      if (me) {
-        const hours = Math.floor(me.total_time_minutes / 60);
-        const mins = me.total_time_minutes % 60;
-
-        guildEmbed = {
-          title: `🏢 ${me.guild_tag} | ${me.guild_name}`,
-          description: `**Global VTC Rank: #${myRank}** out of ${totalGuilds}`,
-          color: guildConfig.embed_color,
-          thumbnail: guildConfig.thumbnail ? { url: guildConfig.thumbnail } : undefined,
-          fields: [
-            { name: "👥 Active Drivers", value: `${me.member_count}`, inline: true },
-            { name: "💰 Total Income", value: `$${Math.round(me.total_income).toLocaleString()}`, inline: true },
-            { name: "🏆 Total Score", value: `${Math.round(me.total_score).toLocaleString()}`, inline: true },
-            { name: "🛤️ Total Distance", value: `${Math.round(me.total_distance_km).toLocaleString()} km`, inline: true },
-            { name: "⏱️ Driving Time", value: `${hours}h ${mins}m`, inline: true },
-            { name: "⭐ Total Stars", value: `${Math.round(me.total_stars).toLocaleString()}`, inline: true },
-            { name: "✅ Clean Deliveries", value: `${me.clean_deliveries}`, inline: true }
-          ]
-        };
-      }
+      guildEmbed = {
+        title: "🏆 VTC Global Leaderboard",
+        description: `Top **${top3.length}** VTCs ranked by **Net Worth** • ${sortedGuilds.length} approved VTCs total`,
+        color: guildConfig.embed_color,
+        thumbnail: guildConfig.thumbnail ? { url: guildConfig.thumbnail } : undefined,
+        fields
+      };
     }
 
     // ─── EMBED 2: Distance Leaderboard ───
@@ -208,7 +186,7 @@ async function performLeaderboardUpdate(client, guildId) {
       (row) => `${Math.round(row.total_distance_km)} km`
     );
     const distanceEmbed = {
-      title: "🛤️ Distance Leaderboard",
+      title: "🛤️ Global Distance Leaderboard",
       color: guildConfig.embed_color,
       fields: distanceFields
     };
@@ -220,7 +198,7 @@ async function performLeaderboardUpdate(client, guildId) {
       (row) => formatMinutes(row.total_time_minutes)
     );
     const timeEmbed = {
-      title: "⏱️ Driving Time Leaderboard",
+      title: "⏱️ Global Driving Time Leaderboard",
       color: guildConfig.embed_color,
       fields: timeFields,
       footer: { text: `Managed by NMC • Last updated • ${new Date().toLocaleString()}` }
