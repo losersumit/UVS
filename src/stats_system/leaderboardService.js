@@ -137,12 +137,12 @@ async function performLeaderboardUpdate(client, guildId) {
       supabase.from("player_stats").select("total_score, total_time_minutes, total_stars, total_distance_km, clean_deliveries, players!inner(guild_id)"),
       supabase.from("player_stats")
         .select("total_distance_km, players!inner(username, display_name, guild_tag, guild_id)")
-        .in("players.guild_id", activeGuildIds)
+        .eq("players.guild_id", guildId)
         .order("total_distance_km", { ascending: false })
         .limit(5),
       supabase.from("player_stats")
         .select("total_time_minutes, players!inner(username, display_name, guild_tag, guild_id)")
-        .in("players.guild_id", activeGuildIds)
+        .eq("players.guild_id", guildId)
         .order("total_time_minutes", { ascending: false })
         .limit(5)
     ]);
@@ -194,7 +194,7 @@ async function performLeaderboardUpdate(client, guildId) {
       (row) => `${Math.round(row.total_distance_km)} km`
     );
     const distanceEmbed = {
-      title: "🛤️ Global Distance Leaderboard",
+      title: "🛤️ Distance Leaderboard",
       color: guildConfig.embed_color,
       fields: distanceFields
     };
@@ -206,10 +206,10 @@ async function performLeaderboardUpdate(client, guildId) {
       (row) => formatMinutes(row.total_time_minutes)
     );
     const timeEmbed = {
-      title: "⏱️ Global Driving Time Leaderboard",
+      title: "⏱️ Driving Time Leaderboard",
       color: guildConfig.embed_color,
       fields: timeFields,
-      footer: { text: `Managed by NMC • Last updated • ${new Date().toLocaleString()}` }
+      footer: { text: "Managed by NMC • For viewing global leaderboards, please use bot commands." }
     };
 
     // 4. Combine into one message: Guild LB → Distance → Time
