@@ -27,6 +27,7 @@ const { supabase } = require("./src/stats_system/supabase");
 const { registerLeaderboardRealtime } = require("./src/stats_system/realtimeLeaderboard");
 const { updateLeaderboard, updateGlobalWebhook } = require("./src/stats_system/leaderboardService");
 const { registerDailyInspector, runDailyInspection } = require("./src/stats_system/dailyInspector");
+const { registerDisplayNameSync } = require("./src/stats_system/displayNameSync");
 const { isOwner } = require("./src/owner");
 const { isGuildApproved } = require("./src/guildGuard");
 const { getGuildConfig } = require("./src/stats_system/guildConfig");
@@ -50,6 +51,9 @@ client.once("clientReady", async () => {
 
   // Register Daily AI Inspector Cron Jobs
   registerDailyInspector(client);
+
+  // Register Display Name Sync Cron Job
+  registerDisplayNameSync(client);
 
   // Update Global Webhook on Restart
   updateGlobalWebhook(client).catch(err =>
