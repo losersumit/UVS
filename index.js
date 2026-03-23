@@ -21,7 +21,7 @@ function requireEnv(name) {
 ].forEach(requireEnv);
 // ───────────────────────
 
-const { Client, GatewayIntentBits } = require('discord.js');
+const { Client, GatewayIntentBits, ActivityType } = require('discord.js');
 const { registerScreenshotListener } = require("./src/stats_system/screenshotListener");
 const { supabase } = require("./src/stats_system/supabase");
 const { registerLeaderboardRealtime } = require("./src/stats_system/realtimeLeaderboard");
@@ -44,6 +44,11 @@ registerScreenshotListener(client);
 
 client.once("clientReady", async () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
+
+  client.user.setPresence({
+    activities: [{ name: "/help", type: ActivityType.Playing }],
+    status: "online"
+  });
 
   // Register Realtime Listener
   registerLeaderboardRealtime(client);
@@ -86,6 +91,7 @@ client.once("clientReady", async () => {
     { name: "levellb", description: "View highest level truckers", options: [{ name: "global", description: "Show all approved VTC members", type: 5, required: false }] },
     { name: "distancelb", description: "View top drivers by total distance", options: [{ name: "global", description: "Show all approved VTC members", type: 5, required: false }] },
     { name: "timelb", description: "View top drivers by total time", options: [{ name: "global", description: "Show all approved VTC members", type: 5, required: false }] },
+    { name: "networthlb", description: "View top drivers by total money earned", options: [{ name: "global", description: "Show all approved VTC members", type: 5, required: false }] },
     { name: "worstdrivers", description: "View worst drivers by penalties", options: [{ name: "global", description: "Show all approved VTC members", type: 5, required: false }] },
     { name: "bestdrivers", description: "View best drivers by clean deliveries", options: [{ name: "global", description: "Show all approved VTC members", type: 5, required: false }] },
     { name: "myvtc", description: "View complete stats and global rank for your current VTC" },
@@ -135,6 +141,22 @@ client.on("interactionCreate", async (interaction) => {
     const hours = Math.floor((stats.total_time_minutes || 0) / 60);
     const minutes = (stats.total_time_minutes || 0) % 60;
 
+    const { data: playerRow } = await supabase
+      .from("players")
+      .select("id")
+      .eq("discord_id", targetUser.id)
+      .maybeSingle();
+
+    let totalMoneyEarned = 0;
+    if (playerRow?.id) {
+      const { data: playerRuns } = await supabase
+        .from("runs")
+        .select("income")
+        .eq("player_id", playerRow.id);
+
+      totalMoneyEarned = (playerRuns || []).reduce((sum, run) => sum + (Number(run.income) || 0), 0);
+    }
+
     // Get all player stats in one query to calculate ranks efficiently
     const { data: allStatsRaw } = await supabase
       .from("player_stats")
@@ -180,6 +202,7 @@ client.on("interactionCreate", async (interaction) => {
         { name: "Total Score", value: `${Math.round(stats.total_score || 0)} (Rank #${scoreRank})`, inline: true },
         { name: "Total Stars", value: `⭐ ${stats.total_stars || 0} (Rank #${starsRank})`, inline: true },
         { name: "Clean Deliveries", value: `${stats.clean_deliveries || 0} (Rank #${cleanRank})`, inline: true },
+        { name: "Total Money Earned", value: `$${Math.round(totalMoneyEarned).toLocaleString()}`, inline: true },
         { name: "Penalties", value: `Dm: ${stats.total_damage_penalty} | Tm: ${stats.total_time_penalty} (Rank #${penaltyRank})`, inline: true }
       ]
     };
@@ -360,6 +383,72 @@ client.on("interactionCreate", async (interaction) => {
     });
   }
 
+  // COMMAND: NET WORTH LB
+  if (interaction.commandName === "networthlb") {
+    await interaction.deferReply();
+    const isGlobal = interaction.options.getBoolean("global") === true;
+
+    let playersQuery = supabase
+      .from("players")
+      .select("id, username, display_name, guild_tag, guild_id");
+
+    if (!isGlobal) {
+      playersQuery = playersQuery.eq("guild_id", interaction.guild.id);
+    } else {
+      const activeIds = (await supabase.from("approved_guilds").select("guild_id").eq("is_suspended", false)).data?.map(g => g.guild_id) || [];
+      if (activeIds.length > 0) playersQuery = playersQuery.in("guild_id", activeIds);
+    }
+
+    const { data: players } = await playersQuery;
+
+    if (!players?.length) return interaction.editReply("❌ No records yet.");
+
+    const playerIds = players.map(player => player.id);
+    const { data: runs } = await supabase
+      .from("runs")
+      .select("player_id, income")
+      .in("player_id", playerIds);
+
+    const incomeByPlayer = new Map();
+    for (const run of runs || []) {
+      incomeByPlayer.set(
+        run.player_id,
+        (incomeByPlayer.get(run.player_id) || 0) + (Number(run.income) || 0)
+      );
+    }
+
+    const rankedPlayers = players
+      .map(player => ({
+        ...player,
+        totalIncome: incomeByPlayer.get(player.id) || 0
+      }))
+      .filter(player => player.totalIncome > 0)
+      .sort((a, b) => b.totalIncome - a.totalIncome)
+      .slice(0, 5);
+
+    if (!rankedPlayers.length) return interaction.editReply("❌ No net worth records yet.");
+
+    const fields = rankedPlayers.map((row, i) => {
+      const tag = row.guild_tag || "";
+      return {
+        name: `#${i + 1} ${tag} ${row.display_name || row.username}`.trim(),
+        value: `💰 $${Math.round(row.totalIncome).toLocaleString()}`,
+        inline: false
+      };
+    });
+
+    const guildConfig = await getGuildConfig(interaction.guild.id);
+    await interaction.editReply({
+      embeds: [{
+        title: isGlobal ? "💰 Global Net Worth Leaderboard" : `💰 Net Worth Leaderboard (${interaction.guild.name})`,
+        description: "Ranked by total money earned from all saved runs.",
+        color: guildConfig.embed_color,
+        thumbnail: guildConfig.thumbnail ? { url: guildConfig.thumbnail } : undefined,
+        fields
+      }]
+    });
+  }
+
   // COMMAND: MYVTC
   if (interaction.commandName === "myvtc") {
     await interaction.deferReply();
@@ -486,6 +575,7 @@ client.on("interactionCreate", async (interaction) => {
         { name: "📈 /levellb [global]", value: "See highest Career Levels. Default is current server only. Set `global: True` to include all servers.", inline: true },
         { name: "🛤️ /distancelb [global]", value: "Rank by Total Distance. Default is current server only. Set `global: True` to include all servers.", inline: true },
         { name: "⏱️ /timelb [global]", value: "Rank by Total Time Driven. Default is current server only. Set `global: True` to include all servers.", inline: true },
+        { name: "💰 /networthlb [global]", value: "Rank by total money earned from saved runs. Default is current server only. Set `global: True` to include all servers.", inline: true },
         { name: "⭐ /bestdrivers [global]", value: "Rank by Clean Deliveries. Default is current server only. Set `global: True` to include all servers.", inline: true },
         { name: "🚨 /worstdrivers [global]", value: "Rank by total penalties. Default is current server only. Set `global: True` to include all servers.", inline: true },
         { name: "🏢 /myvtc", value: "View complete stats and global rank for your VTC.", inline: true },
