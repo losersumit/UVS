@@ -16,7 +16,7 @@ async function execute(interaction) {
   await supabase.from("player_stats").update({
     total_distance_km: 0, total_time_minutes: 0, best_avg_speed_kmph: 0,
     clean_deliveries: 0, current_level: 0, total_damage_penalty: 0,
-    total_time_penalty: 0, total_score: 0, total_stars: 0, total_income: 0,
+    total_time_penalty: 0, total_score: 0, total_stars: 0, wallet: 0,
     net_worth: 0
   }).eq("player_id", player.id);
 
