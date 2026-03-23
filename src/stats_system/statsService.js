@@ -144,7 +144,8 @@ async function applyRunStats(playerId, ocr, client) {
     total_stars: (stats.total_stars || 0) + starsEarned,
     last_level: ocr.level,
     last_xp: ocr.xp || stats.last_xp || 0,
-    total_income: (stats.total_income || 0) + income
+    total_income: (stats.total_income || 0) + income,
+    net_worth: (stats.net_worth || 0) + income
   };
 
   // Only update speed if it's a new personal best
