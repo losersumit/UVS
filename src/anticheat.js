@@ -26,8 +26,8 @@ function validateRun(ocr, prevStats) {
   const level = Number(ocr.level);
 
   // Safe access to previous stats
-  const prevLevel = Number(prevStats?.current_level || 0);
-  const prevXP = Number(prevStats?.last_xp || 0);
+  const prevLevel = Number(prevStats?.level || 0);
+  const prevXP = Number(prevStats?.xp || 0);
 
   if (distance <= 0 || timeMin <= 0) {
     return reject("Invalid distance or time (0 or negative)");

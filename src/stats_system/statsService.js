@@ -71,8 +71,9 @@ async function applyRunStats(playerId, ocr, client) {
         player_id: playerId,
         total_distance_km: 0,
         total_time_minutes: 0,
-        current_level: 0,
-        last_xp: 0
+        level: 0,
+        xp: 0,
+        runs: 0
       })
       .select().single();
     if (insError) throw insError;
@@ -137,13 +138,13 @@ async function applyRunStats(playerId, ocr, client) {
   const update = {
     total_distance_km: newDistance,
     total_time_minutes: newTime,
-    current_level: ocr.level,
+    level: Number(ocr.level) || stats.level || 0,
+    xp: Number(ocr.xp) || stats.xp || 0,
     total_damage_penalty: (stats.total_damage_penalty || 0) + damagePenalty,
     total_time_penalty: (stats.total_time_penalty || 0) + timePenalty,
     total_score: (stats.total_score || 0) + finalScore,
     total_stars: (stats.total_stars || 0) + starsEarned,
-    last_level: ocr.level,
-    last_xp: ocr.xp || stats.last_xp || 0,
+    runs: (stats.runs || 0) + 1,
     wallet: (stats.wallet || 0) + income,
     net_worth: (stats.net_worth || 0) + income
   };

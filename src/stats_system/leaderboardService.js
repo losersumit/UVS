@@ -1,11 +1,16 @@
 // stats_system/leaderboardService.js
 const { supabase } = require("./supabase");
 const { getGuildConfig } = require("./guildConfig");
+const { formatCompact, formatDistance, formatHours } = require("../formatters");
 
-function formatMinutes(minutes) {
-  const h = Math.floor(minutes / 60);
-  const m = Math.floor(minutes % 60);
-  return `${h}h ${m}m`;
+// Guild name cache for logging
+const guildNameCache = new Map();
+async function getGuildName(guildId) {
+  if (guildNameCache.has(guildId)) return guildNameCache.get(guildId);
+  const { data } = await supabase.from("approved_guilds").select("guild_tag, guild_name").eq("guild_id", guildId).maybeSingle();
+  const name = data ? `${data.guild_tag} ${data.guild_name}` : guildId;
+  guildNameCache.set(guildId, name);
+  return name;
 }
 
 /**
@@ -47,7 +52,8 @@ async function sendOrUpdate(guildId, channel, dbColumn, currentId, embed) {
   // 2. Send New Message
   try {
     const newMsg = await channel.send({ embeds: [embed] });
-    console.log(`[Leaderboard] Sent new embed for ${dbColumn} in guild ${guildId} (msg: ${newMsg.id})`);
+    const gName = await getGuildName(guildId);
+    console.log(`[Leaderboard] Sent new embed for ${dbColumn} in ${gName} (msg: ${newMsg.id})`);
 
     // 3. Save new ID to Database immediately
     const { error: saveErr } = await supabase
@@ -59,7 +65,8 @@ async function sendOrUpdate(guildId, channel, dbColumn, currentId, embed) {
 
     return newMsg.id;
   } catch (err) {
-    console.error(`[Leaderboard] Failed to send ${dbColumn} for guild ${guildId}:`, err.message);
+    const gErrName = await getGuildName(guildId);
+    console.error(`[Leaderboard] Failed to send ${dbColumn} for ${gErrName}:`, err.message);
     return null;
   }
 }
@@ -98,7 +105,8 @@ async function performLeaderboardUpdate(client, guildId) {
     const guildConfig = await getGuildConfig(guildId);
 
     if (!guildConfig.leaderboard_channel_id) {
-      console.warn(`[Leaderboard] Skipping guild ${guildId} — no leaderboard_channel_id set in DB.`);
+      const skipName = await getGuildName(guildId);
+      console.warn(`[Leaderboard] Skipping ${skipName} — no leaderboard_channel_id set in DB.`);
       return;
     }
 
@@ -110,12 +118,14 @@ async function performLeaderboardUpdate(client, guildId) {
       .single();
 
     if (error || !guildRow) {
-      console.error(`[Leaderboard] Failed to fetch guild row for ${guildId}:`, error?.message);
+      const fetchErrName = await getGuildName(guildId);
+      console.error(`[Leaderboard] Failed to fetch guild row for ${fetchErrName}:`, error?.message);
       return;
     }
 
-    const channel = await client.channels.fetch(guildConfig.leaderboard_channel_id).catch((err) => {
-      console.error(`[Leaderboard] Cannot fetch channel ${guildConfig.leaderboard_channel_id} for guild ${guildId}:`, err.message);
+    const channel = await client.channels.fetch(guildConfig.leaderboard_channel_id).catch(async (err) => {
+      const chErrName = await getGuildName(guildId);
+      console.error(`[Leaderboard] Cannot fetch channel for ${chErrName}:`, err.message);
       return null;
     });
     if (!channel) return;
@@ -174,7 +184,7 @@ async function performLeaderboardUpdate(client, guildId) {
       
       const fields = top3.map((g, i) => ({
         name: `#${i + 1} ${g.guild_tag} | ${g.guild_name}`,
-        value: `💰 **$${Math.round(g.net_worth).toLocaleString()}** Net Worth  •  👥 ${g.member_count} drivers`,
+        value: `💰 **$${formatCompact(g.net_worth)}** Net Worth  •  👥 ${g.member_count} drivers`,
         inline: false
       }));
 
@@ -189,12 +199,12 @@ async function performLeaderboardUpdate(client, guildId) {
 
     // ─── EMBED 2: Distance Leaderboard ───
     const myGuildRow = guildsData?.find(g => g.guild_id === guildId);
-    const myTag = myGuildRow?.guild_tag ? `[${myGuildRow.guild_tag}]` : "";
+    const myTag = myGuildRow?.guild_tag ? `${myGuildRow.guild_tag}` : "";
 
     const distanceFields = await getLeaderboardFields(
       topDistance || [],
       channel.guild,
-      (row) => `${Math.round(row.total_distance_km)} km`
+      (row) => formatDistance(row.total_distance_km)
     );
     const distanceEmbed = {
       title: `🛤️ Distance Leaderboard ${myTag}`.trim(),
@@ -206,7 +216,7 @@ async function performLeaderboardUpdate(client, guildId) {
     const timeFields = await getLeaderboardFields(
       topTime || [],
       channel.guild,
-      (row) => formatMinutes(row.total_time_minutes)
+      (row) => formatHours(row.total_time_minutes)
     );
     const timeEmbed = {
       title: `⏱️ Driving Time Leaderboard ${myTag}`.trim(),
@@ -230,20 +240,23 @@ async function performLeaderboardUpdate(client, guildId) {
         await msg.edit({ embeds });
         return;
       } catch (err) {
-        console.warn(`[Leaderboard] Message ${currentId} not found for guild ${guildId}. Sending new...`);
+        const editErrName = await getGuildName(guildId);
+        console.warn(`[Leaderboard] Message ${currentId} not found for ${editErrName}. Sending new...`);
       }
     }
 
     try {
       const newMsg = await channel.send({ embeds });
-      console.log(`[Leaderboard] Sent combined leaderboard for guild ${guildId} (msg: ${newMsg.id})`);
+      const sentName = await getGuildName(guildId);
+      console.log(`[Leaderboard] Sent combined leaderboard for ${sentName} (msg: ${newMsg.id})`);
       const { error: saveErr } = await supabase
         .from("approved_guilds")
         .update({ lb_msg_guilds: newMsg.id })
         .eq("guild_id", guildId);
-      if (saveErr) console.error(`[Leaderboard] Failed to save lb_msg_guilds for ${guildId}:`, saveErr.message);
+      if (saveErr) { const sName = await getGuildName(guildId); console.error(`[Leaderboard] Failed to save lb_msg_guilds for ${sName}:`, saveErr.message); }
     } catch (err) {
-      console.error(`[Leaderboard] Failed to send combined leaderboard for ${guildId}:`, err.message);
+      const sendErrName = await getGuildName(guildId);
+      console.error(`[Leaderboard] Failed to send combined leaderboard for ${sendErrName}:`, err.message);
     }
 
   } catch (err) {
@@ -344,12 +357,10 @@ async function performGlobalWebhookUpdate(client, guildId = null) {
     }
 
     for (const guild of guildAggregates.values()) {
-      const hours = Math.floor(guild.total_time_minutes / 60);
-      const minutes = guild.total_time_minutes % 60;
-      let description = `**Net Worth:** $${Math.round(guild.total_income).toLocaleString()}\n`;
+      let description = `**Net Worth:** $${formatCompact(guild.total_income)}\n`;
       description += `**Drivers:** ${guild.driver_count}\n`;
-      description += `**Time:** ${hours}h ${minutes}m\n`;
-      description += `**Distance:** ${Math.round(guild.total_distance_km).toLocaleString()} km\n`;
+      description += `**Time:** ${formatHours(guild.total_time_minutes)}\n`;
+      description += `**Distance:** ${formatDistance(guild.total_distance_km)}\n`;
       description += `**Runs:** ${guild.total_runs}`;
 
       let parsedColor = 0xffffff;
@@ -377,13 +388,13 @@ async function performGlobalWebhookUpdate(client, guildId = null) {
           await webhookClient.editMessage(messageId, { content: null, embeds: [embed] });
           continue;
         } catch (err) {
-          console.warn(`[Global Webhook] Failed to edit msg ${messageId} for ${guild.guild_name} (${err.message}). Sending new msg...`);
+          console.warn(`[Global Webhook] Failed to edit msg for ${guild.guild_tag} ${guild.guild_name} (${err.message}). Sending new msg...`);
         }
       }
 
       try {
         const sentMessage = await webhookClient.send({ content: null, embeds: [embed] });
-        console.log(`[Global Webhook] Sent new embed for ${guild.guild_name} with ID ${sentMessage.id}`);
+        console.log(`[Global Webhook] Sent new embed for ${guild.guild_tag} ${guild.guild_name} (ID: ${sentMessage.id})`);
 
         // Save the new message ID so future updates can edit it instead of re-sending
         const { error: saveErr } = await supabase
@@ -391,9 +402,9 @@ async function performGlobalWebhookUpdate(client, guildId = null) {
           .update({ webhook_id: sentMessage.id })
           .eq("guild_id", guild.guild_id);
 
-        if (saveErr) console.error(`[Global Webhook] Failed to save webhook_id for ${guild.guild_name}:`, saveErr.message);
+        if (saveErr) console.error(`[Global Webhook] Failed to save webhook_id for ${guild.guild_tag} ${guild.guild_name}:`, saveErr.message);
       } catch (err) {
-        console.error(`[Global Webhook] Failed to send new msg for ${guild.guild_name}:`, err.message);
+        console.error(`[Global Webhook] Failed to send new msg for ${guild.guild_tag} ${guild.guild_name}:`, err.message);
       }
     }
 

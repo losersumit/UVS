@@ -1,6 +1,7 @@
 const { supabase } = require("../stats_system/supabase");
 const { getGuildConfig } = require("../stats_system/guildConfig");
 const { getActiveGuildIds } = require("../helpers");
+const { formatCompact, formatDistance, formatHours } = require("../formatters");
 
 // ─── Shared helper for standard leaderboard commands ───
 async function runLeaderboard(interaction, { statColumn, emoji, title, formatValue }) {
@@ -58,7 +59,7 @@ async function speedlb(interaction) {
 
 async function levellb(interaction) {
   await runLeaderboard(interaction, {
-    statColumn: "current_level",
+    statColumn: "level",
     emoji: "🏅",
     title: "Level Leaderboard",
     formatValue: v => `Level ${v}`
@@ -70,7 +71,7 @@ async function distancelb(interaction) {
     statColumn: "total_distance_km",
     emoji: "🛤️",
     title: "Distance Leaderboard",
-    formatValue: v => `${Math.round(v).toLocaleString()} km`
+    formatValue: v => formatDistance(v)
   });
 }
 
@@ -79,11 +80,7 @@ async function timelb(interaction) {
     statColumn: "total_time_minutes",
     emoji: "⏱️",
     title: "Driving Time Leaderboard",
-    formatValue: v => {
-      const hours = Math.floor(v / 60);
-      const minutes = v % 60;
-      return `${hours}h ${minutes}m`;
-    }
+    formatValue: v => formatHours(v)
   });
 }
 
@@ -92,7 +89,7 @@ async function networthlb(interaction) {
     statColumn: "net_worth",
     emoji: "💰",
     title: "Net Worth Leaderboard",
-    formatValue: v => `$${Math.round(v).toLocaleString()}`
+    formatValue: v => `$${formatCompact(v)}`
   });
 }
 

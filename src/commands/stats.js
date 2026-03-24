@@ -1,6 +1,7 @@
 const { supabase } = require("../stats_system/supabase");
 const { getGuildConfig } = require("../stats_system/guildConfig");
 const { getActiveGuildIds } = require("../helpers");
+const { formatCompact, formatDistance, formatHours } = require("../formatters");
 
 async function execute(interaction) {
   await interaction.deferReply();
@@ -17,21 +18,18 @@ async function execute(interaction) {
   }
 
   const displayName = stats.players?.display_name || stats.players?.username || targetUser.username;
-  const hours = Math.floor((stats.total_time_minutes || 0) / 60);
-  const minutes = (stats.total_time_minutes || 0) % 60;
-  const totalMoneyEarned = stats.net_worth || 0;
 
   // Get all player stats in one query to calculate ranks efficiently
   const { data: allStatsRaw } = await supabase
     .from("player_stats")
-    .select("current_level, total_distance_km, total_time_minutes, best_avg_speed_kmph, total_score, total_stars, clean_deliveries, total_damage_penalty, total_time_penalty, players!inner(guild_id)");
+    .select("level, total_distance_km, total_time_minutes, best_avg_speed_kmph, total_score, total_stars, clean_deliveries, total_damage_penalty, total_time_penalty, players!inner(guild_id)");
 
   const activeIds = await getActiveGuildIds();
   const allStats = (allStatsRaw || []).filter(s => activeIds.includes(s.players?.guild_id));
 
   // Calculate all ranks in a single pass
   const userValues = {
-    level: stats.current_level || 0,
+    level: stats.level || 0,
     distance: stats.total_distance_km || 0,
     time: stats.total_time_minutes || 0,
     speed: stats.best_avg_speed_kmph || 0,
@@ -44,7 +42,7 @@ async function execute(interaction) {
   const ranks = { level: 1, distance: 1, time: 1, speed: 1, score: 1, stars: 1, clean: 1, penalty: 1 };
 
   for (const s of allStats) {
-    if ((s.current_level || 0) > userValues.level) ranks.level++;
+    if ((s.level || 0) > userValues.level) ranks.level++;
     if ((s.total_distance_km || 0) > userValues.distance) ranks.distance++;
     if ((s.total_time_minutes || 0) > userValues.time) ranks.time++;
     if ((s.best_avg_speed_kmph || 0) > userValues.speed) ranks.speed++;
@@ -63,13 +61,14 @@ async function execute(interaction) {
     thumbnail: guildConfig.thumbnail ? { url: guildConfig.thumbnail } : undefined,
     fields: [
       { name: "Level", value: `${userValues.level} (Rank #${ranks.level})`, inline: true },
-      { name: "Total Distance", value: `${Math.round(userValues.distance)} km (Rank #${ranks.distance})`, inline: true },
-      { name: "Driving Time", value: `${hours}h ${minutes}m (Rank #${ranks.time})`, inline: true },
+      { name: "Total Distance", value: `${formatDistance(userValues.distance)} (Rank #${ranks.distance})`, inline: true },
+      { name: "Driving Time", value: `${formatHours(userValues.time)} (Rank #${ranks.time})`, inline: true },
       { name: "Best Avg Speed", value: `${userValues.speed} km/h (Rank #${ranks.speed})`, inline: true },
-      { name: "XP", value: `${stats.last_xp || 0} (Rank #${ranks.score})`, inline: true },
+      { name: "XP", value: `${stats.xp || 0} (Rank #${ranks.score})`, inline: true },
       { name: "Total Stars", value: `⭐ ${userValues.stars} (Rank #${ranks.stars})`, inline: true },
       { name: "Clean Deliveries", value: `${userValues.clean} (Rank #${ranks.clean})`, inline: true },
-      { name: "Total Money Earned", value: `$${Math.round(totalMoneyEarned).toLocaleString()}`, inline: true },
+      { name: "Net Worth", value: `$${formatCompact(stats.net_worth || 0)}`, inline: true },
+      { name: "Runs", value: `${stats.runs || 0}`, inline: true },
       { name: "Penalties", value: `Dm: ${stats.total_damage_penalty} | Tm: ${stats.total_time_penalty} (Rank #${ranks.penalty})`, inline: true }
     ]
   };
