@@ -38,7 +38,6 @@ async function execute(interaction) {
       { name: "💰 /networthlb [global]", value: "Rank by total money earned from saved runs. Default is current server only. Set `global: True` to include all servers.", inline: true },
       { name: "⭐ /bestdrivers [global]", value: "Rank by Clean Deliveries. Default is current server only. Set `global: True` to include all servers.", inline: true },
       { name: "🚨 /worstdrivers [global]", value: "Rank by total penalties. Default is current server only. Set `global: True` to include all servers.", inline: true },
-      { name: "🏢 /myvtc", value: "View complete stats and global rank for your VTC.", inline: true },
       { name: "🛠️ /clearstats", value: "**(Owner Only)** Reset a user's stats completely.", inline: true },
       { name: "✅ Approved VTCs", value: guildList || "No VTCs found.", inline: false },
       { name: "ℹ️ /help", value: "Show this information menu.", inline: true }

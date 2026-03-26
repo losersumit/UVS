@@ -143,7 +143,7 @@ async function performLeaderboardUpdate(client, guildId) {
       { data: topDistance },
       { data: topTime }
     ] = await Promise.all([
-      supabase.from("approved_guilds").select("guild_id, guild_tag, guild_name, net_worth").eq("is_suspended", false),
+      supabase.from("approved_guilds").select("guild_id, guild_tag, guild_name, net_worth, runs").eq("is_suspended", false),
       supabase.from("player_stats").select("total_score, total_time_minutes, total_stars, total_distance_km, clean_deliveries, players!inner(guild_id)"),
       supabase.from("player_stats")
         .select("total_distance_km, players!inner(username, display_name, guild_tag, guild_id)")
@@ -157,7 +157,7 @@ async function performLeaderboardUpdate(client, guildId) {
         .limit(5)
     ]);
 
-    // ─── EMBED 1: VTC Global Leaderboard (Top 3) ───
+    // ─── EMBED 1: VTC Stats Embed (formerly myvtc) ───
     let guildEmbed = null;
     if (guildsData && guildStats) {
       const guildAggregates = new Map();
@@ -167,34 +167,56 @@ async function performLeaderboardUpdate(client, guildId) {
           guild_tag: g.guild_tag || "Unknown",
           guild_name: g.guild_name || "Unknown Server",
           net_worth: Number(g.net_worth) || 0,
+          runs: Number(g.runs) || 0,
+          total_score: 0,
+          total_time_minutes: 0,
+          total_stars: 0,
+          total_distance_km: 0,
+          clean_deliveries: 0,
           member_count: 0
         });
       }
       for (const stat of guildStats) {
         const gid = stat.players?.guild_id;
         if (!gid || !guildAggregates.has(gid)) continue;
-        guildAggregates.get(gid).member_count += 1;
+        const agg = guildAggregates.get(gid);
+        agg.total_score += Number(stat.total_score || 0);
+        agg.total_time_minutes += Number(stat.total_time_minutes || 0);
+        agg.total_stars += Number(stat.total_stars || 0);
+        agg.total_distance_km += Number(stat.total_distance_km || 0);
+        agg.clean_deliveries += Number(stat.clean_deliveries || 0);
+        agg.member_count += 1;
       }
 
       // Sort all guilds
       const sortedGuilds = Array.from(guildAggregates.values())
         .sort((a, b) => b.net_worth - a.net_worth);
 
-      const top3 = sortedGuilds.slice(0, 3);
+      const me = guildAggregates.get(guildId);
       
-      const fields = top3.map((g, i) => ({
-        name: `#${i + 1} ${g.guild_tag} | ${g.guild_name}`,
-        value: `💰 **$${formatCompact(g.net_worth)}** Net Worth  •  👥 ${g.member_count} drivers`,
-        inline: false
-      }));
+      if (me) {
+        const myRank = sortedGuilds.findIndex(g => g.guild_id === guildId) + 1;
+        const totalGuilds = sortedGuilds.length;
+        const hours = Math.floor(me.total_time_minutes / 60);
+        const mins = me.total_time_minutes % 60;
 
-      guildEmbed = {
-        title: "🏆 VTC Global Leaderboard",
-        description: `Top **${top3.length}** VTCs ranked by **Net Worth** • ${sortedGuilds.length} approved VTCs total`,
-        color: guildConfig.embed_color,
-        thumbnail: guildConfig.thumbnail ? { url: guildConfig.thumbnail } : undefined,
-        fields
-      };
+        guildEmbed = {
+          title: `🏢 ${me.guild_tag} | ${me.guild_name}`,
+          description: `**Global VTC Rank: #${myRank}** out of ${totalGuilds}`,
+          color: guildConfig.embed_color,
+          thumbnail: guildConfig.thumbnail ? { url: guildConfig.thumbnail } : undefined,
+          fields: [
+            { name: "👥 Active Drivers", value: `${me.member_count}`, inline: true },
+            { name: "💰 Net Worth", value: `$${Math.round(me.net_worth).toLocaleString()}`, inline: true },
+            { name: "🏆 Total Score", value: `${Math.round(me.total_score).toLocaleString()}`, inline: true },
+            { name: "🛤️ Total Distance", value: `${Math.round(me.total_distance_km).toLocaleString()} km`, inline: true },
+            { name: "⏱️ Driving Time", value: `${hours}h ${mins}m`, inline: true },
+            { name: "⭐ Total Stars", value: `${Math.round(me.total_stars).toLocaleString()}`, inline: true },
+            { name: "✅ Clean Deliveries", value: `${me.clean_deliveries}`, inline: true },
+            { name: "🚛 Total Runs", value: `${me.runs}`, inline: true }
+          ]
+        };
+      }
     }
 
     // ─── EMBED 2: Distance Leaderboard ───
@@ -357,11 +379,12 @@ async function performGlobalWebhookUpdate(client, guildId = null) {
     }
 
     for (const guild of guildAggregates.values()) {
-      let description = `**Net Worth:** $${formatCompact(guild.total_income)}\n`;
-      description += `**Drivers:** ${guild.driver_count}\n`;
-      description += `**Time:** ${formatHours(guild.total_time_minutes)}\n`;
-      description += `**Distance:** ${formatDistance(guild.total_distance_km)}\n`;
-      description += `**Runs:** ${guild.total_runs}`;
+      let description = 
+        `💰 Net Worth   : **$${formatCompact(guild.total_income)}**\n` +
+        `👥 Drivers     : **${guild.driver_count}**\n` +
+        `⏱️ Time        : **${formatHours(guild.total_time_minutes)}**\n` +
+        `🛣️ Distance    : **${formatDistance(guild.total_distance_km)}**\n` +
+        `🚛 Runs        : **${guild.total_runs}**`;
 
       let parsedColor = 0xffffff;
       if (typeof guild.embed_color === 'number') {
@@ -378,7 +401,7 @@ async function performGlobalWebhookUpdate(client, guildId = null) {
         description,
         color: parsedColor,
         thumbnail: guild.avatar_url ? { url: guild.avatar_url } : undefined,
-        footer: { text: `Managed by NMC • Last updated • ${new Date().toLocaleString()}` }
+        footer: { text: `• Last updated • ${new Date().toLocaleString()}` }
       };
 
       const messageId = guild.webhook_id ? String(guild.webhook_id).trim() : null;

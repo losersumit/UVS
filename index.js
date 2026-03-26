@@ -34,7 +34,7 @@ const { isGuildApproved } = require("./src/guildGuard");
 const statsCmd = require("./src/commands/stats");
 const { speedlb, levellb, distancelb, timelb, networthlb } = require("./src/commands/leaderboards");
 const { worstdrivers, bestdrivers } = require("./src/commands/drivers");
-const { myvtc, suspendvtc, restorevtc } = require("./src/commands/vtc");
+const { suspendvtc, restorevtc } = require("./src/commands/vtc");
 const adminCmd = require("./src/commands/admin");
 const helpCmd = require("./src/commands/help");
 
@@ -48,7 +48,6 @@ const commandHandlers = {
   networthlb,
   worstdrivers,
   bestdrivers,
-  myvtc,
   suspendvtc,
   restorevtc,
   clearstats: adminCmd.execute,
@@ -124,7 +123,6 @@ client.once("clientReady", async () => {
     { name: "networthlb", description: "View top drivers by their Net Worth", options: [{ name: "global", description: "Show all approved VTC members", type: 5, required: false }] },
     { name: "worstdrivers", description: "View worst drivers by penalties", options: [{ name: "global", description: "Show all approved VTC members", type: 5, required: false }] },
     { name: "bestdrivers", description: "View best drivers by clean deliveries", options: [{ name: "global", description: "Show all approved VTC members", type: 5, required: false }] },
-    { name: "myvtc", description: "View complete stats and global rank for your current VTC" },
     { name: "clearstats", description: "Clear a user's stats (Owner Only)", options: [{ name: "user", description: "User to clear", type: 6, required: true }] },
     { name: "suspendvtc", description: "Suspend a VTC from leaderboards (Owner Only)", options: [{ name: "guild_id", type: 3, description: "ID of the server", required: true }] },
     { name: "restorevtc", description: "Restore a suspended VTC to leaderboards (Owner Only)", options: [{ name: "guild_id", type: 3, description: "ID of the server", required: true }] },
