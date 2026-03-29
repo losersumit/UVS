@@ -396,12 +396,25 @@ async function performGlobalWebhookUpdate(client, guildId = null) {
         parsedColor = 0xffffff;
       }
 
+      const { data: latestRun } = await supabase
+        .from("runs")
+        .select("created_at, players!inner(guild_id)")
+        .eq("players.guild_id", guild.guild_id)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      let footerText = "• No jobs logged yet •";
+      if (latestRun && latestRun.created_at) {
+        footerText = `• Latest Job • ${new Date(latestRun.created_at).toLocaleString()}`;
+      }
+
       const embed = {
         title: `🏢 ${guild.guild_tag || "[VTC]"} ${guild.guild_name || "Unknown Guild"}`,
         description,
         color: parsedColor,
         thumbnail: guild.avatar_url ? { url: guild.avatar_url } : undefined,
-        footer: { text: `• Last updated • ${new Date().toLocaleString()}` }
+        footer: { text: footerText }
       };
 
       const messageId = guild.webhook_id ? String(guild.webhook_id).trim() : null;
