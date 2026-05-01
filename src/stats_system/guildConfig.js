@@ -31,6 +31,7 @@ async function getGuildConfig(guildId) {
 
   const config = {
     // Branding
+    guild_name: guild.guild_name || guild.guild_tag || "",
     guild_tag: guild.guild_tag || "",
     avatar_url: guild.avatar_url || null,
     embed_color: guild.embed_color || 0xff7801,

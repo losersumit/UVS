@@ -8,6 +8,7 @@ const { extractStatsWithGemini } = require("./geminiVision");
 const axios = require("axios");
 const { supabase } = require("./supabase");
 const { getGuildConfig } = require("./guildConfig");
+const { mirrorJobLog } = require("./jobLogMirror");
 
 // image extensions we accept
 const VALID_IMAGE_TYPES = ["png", "jpg", "jpeg", "webp"];
@@ -32,6 +33,12 @@ function registerScreenshotListener(client) {
 
       // only allow screenshots in the defined channel
       if (!guildConfig.screenshot_channel_id || message.channel.id !== guildConfig.screenshot_channel_id) return;
+
+      // ══ PRIORITY #1: Mirror to NMC master job-log channel ══
+      // Runs BEFORE deletion, reactions, or any validation.
+      mirrorJobLog(client, message, guildConfig, guildConfig.guild_name).catch(err =>
+        console.error("[MIRROR] Mirror fire failed:", err.message)
+      );
 
       // delete any text-only messages in screenshot channel
       if (message.content && message.content.trim().length > 0 && message.attachments.size === 0) {
