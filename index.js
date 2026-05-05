@@ -90,6 +90,42 @@ client.once("clientReady", async () => {
     console.error("Global webhook update on restart failed:", err)
   );
 
+  // ─── SUSPENDED GUILD SWEEP ───
+  // On every restart, leave any guild that is suspended or not in approved_guilds
+  (async () => {
+    try {
+      const { data: approvedGuilds, error } = await supabase
+        .from("approved_guilds")
+        .select("guild_id, is_suspended");
+
+      if (error) {
+        console.error("[SuspendedSweep] Failed to fetch approved guilds:", error);
+        return;
+      }
+
+      const approvedMap = new Map(
+        (approvedGuilds || []).map(g => [g.guild_id, g.is_suspended])
+      );
+
+      for (const [guildId, guild] of client.guilds.cache) {
+        const isSuspended = approvedMap.get(guildId);
+        const isNotApproved = !approvedMap.has(guildId);
+
+        if (isSuspended || isNotApproved) {
+          const reason = isSuspended ? "suspended" : "not approved";
+          console.log(`[SuspendedSweep] Leaving ${reason} guild: ${guild.name} (${guildId})`);
+          await guild.leave().catch(err =>
+            console.error(`[SuspendedSweep] Failed to leave ${guildId}:`, err)
+          );
+        }
+      }
+
+      console.log("[SuspendedSweep] Startup guild sweep complete.");
+    } catch (err) {
+      console.error("[SuspendedSweep] Sweep failed:", err);
+    }
+  })();
+
   // Refresh all guild leaderboards on Restart
   (async () => {
     try {
