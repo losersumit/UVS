@@ -16,7 +16,7 @@ async function getGuildConfig(guildId) {
   // Fetch from database
   const { data: guild, error } = await supabase
     .from("approved_guilds")
-    .select("*")
+    .select("*, call_channel_id::text")
     .eq("guild_id", guildId)
     .maybeSingle();
 

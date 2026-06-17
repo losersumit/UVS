@@ -36,7 +36,7 @@ async function execute(interaction) {
   // Fetch all non-suspended, approved VTCs except the caller
   const { data: guilds, error } = await supabase
     .from("approved_guilds")
-    .select("guild_id, guild_name, guild_tag, call_channel_id, avatar_url, embed_color")
+    .select("guild_id, guild_name, guild_tag, call_channel_id::text, avatar_url, embed_color")
     .eq("is_suspended", false)
     .neq("guild_id", callerGuildId)
     .order("guild_name", { ascending: true });
@@ -119,7 +119,7 @@ async function handleSelectMenu(interaction) {
   // Fetch target guild config
   const { data: targetGuild, error } = await supabase
     .from("approved_guilds")
-    .select("guild_id, guild_name, guild_tag, call_channel_id, avatar_url, embed_color")
+    .select("guild_id, guild_name, guild_tag, call_channel_id::text, avatar_url, embed_color")
     .eq("guild_id", targetGuildId)
     .maybeSingle();
 
