@@ -76,7 +76,7 @@ async function handleCallMessage(message) {
   // Determine which side sent the message and where to forward
   const isCaller = message.channel.id === call.callerChannelId;
   const senderGuildId = isCaller ? call.callerGuildId : call.targetGuildId;
-  const senderName = isCaller ? call.callerGuildName : call.targetGuildName;
+  const senderTag = isCaller ? (call.callerGuildTag || call.callerGuildName) : (call.targetGuildTag || call.targetGuildName);
   const targetChannelId = isCaller ? call.targetChannelId : call.callerChannelId;
 
   // Track participant
@@ -86,7 +86,7 @@ async function handleCallMessage(message) {
   call.participants[senderGuildId].add(message.author.id);
 
   // Build the forwarded message content
-  const prefix = `**[${senderName}]** : `;
+  const prefix = `**[${senderTag}]** : `;
   const content = message.content ? `${prefix}${message.content}` : prefix;
 
   // Collect attachments
