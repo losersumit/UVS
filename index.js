@@ -37,6 +37,8 @@ const { worstdrivers, bestdrivers } = require("./src/commands/drivers");
 const { suspendvtc, restorevtc } = require("./src/commands/vtc");
 const adminCmd = require("./src/commands/admin");
 const helpCmd = require("./src/commands/help");
+const connectCmd = require("./src/commands/connect");
+const { handleCallMessage } = require("./src/callManager");
 
 // ─── Command Router ───
 const commandHandlers = {
@@ -52,6 +54,7 @@ const commandHandlers = {
   restorevtc,
   clearstats: adminCmd.execute,
   help: helpCmd.execute,
+  connect: connectCmd.execute,
 };
 
 const client = new Client({
@@ -162,7 +165,8 @@ client.once("clientReady", async () => {
     { name: "clearstats", description: "Clear a user's stats (Owner Only)", options: [{ name: "user", description: "User to clear", type: 6, required: true }] },
     { name: "suspendvtc", description: "Suspend a VTC from leaderboards (Owner Only)", options: [{ name: "guild_id", type: 3, description: "ID of the server", required: true }] },
     { name: "restorevtc", description: "Restore a suspended VTC to leaderboards (Owner Only)", options: [{ name: "guild_id", type: 3, description: "ID of the server", required: true }] },
-    { name: "help", description: "Show bot instructions and commands" }
+    { name: "help", description: "Show bot instructions and commands" },
+    { name: "connect", description: "Establish a communication channel with another VTC" }
   ];
 
   await client.application.commands.set(commands);
@@ -180,25 +184,70 @@ client.on("guildCreate", async (guild) => {
 
 // ─── INTERACTION HANDLER ───
 client.on("interactionCreate", async (interaction) => {
-  if (!interaction.isChatInputCommand()) return;
+  // ─── Slash Commands ───
+  if (interaction.isChatInputCommand()) {
+    if (interaction.guild && !await isGuildApproved(interaction.guild.id)) {
+      return interaction.reply({ content: "❌ Unauthorized server.", ephemeral: true });
+    }
 
-  if (interaction.guild && !await isGuildApproved(interaction.guild.id)) {
-    return interaction.reply({ content: "❌ Unauthorized server.", ephemeral: true });
+    const handler = commandHandlers[interaction.commandName];
+    if (handler) {
+      try {
+        await handler(interaction);
+      } catch (err) {
+        console.error(`❌ Command error [${interaction.commandName}]:`, err);
+        const reply = { content: "❌ An error occurred while processing this command.", ephemeral: true };
+        if (interaction.deferred || interaction.replied) {
+          await interaction.editReply(reply).catch(() => {});
+        } else {
+          await interaction.reply(reply).catch(() => {});
+        }
+      }
+    }
+    return;
   }
 
-  const handler = commandHandlers[interaction.commandName];
-  if (handler) {
+  // ─── Select Menus (Connect VTC Selector) ───
+  if (interaction.isStringSelectMenu()) {
     try {
-      await handler(interaction);
+      await connectCmd.handleSelectMenu(interaction);
     } catch (err) {
-      console.error(`❌ Command error [${interaction.commandName}]:`, err);
-      const reply = { content: "❌ An error occurred while processing this command.", ephemeral: true };
+      console.error("❌ Select menu error:", err);
+      const reply = { content: "❌ An error occurred while processing your selection.", ephemeral: true };
       if (interaction.deferred || interaction.replied) {
         await interaction.editReply(reply).catch(() => {});
       } else {
         await interaction.reply(reply).catch(() => {});
       }
     }
+    return;
+  }
+
+  // ─── Buttons (Connect Establish / Decline / Terminate) ───
+  if (interaction.isButton()) {
+    if (interaction.customId.startsWith("connect_")) {
+      try {
+        await connectCmd.handleButton(interaction);
+      } catch (err) {
+        console.error("❌ Button error:", err);
+        const reply = { content: "❌ An error occurred while processing this action.", ephemeral: true };
+        if (interaction.deferred || interaction.replied) {
+          await interaction.editReply(reply).catch(() => {});
+        } else {
+          await interaction.reply(reply).catch(() => {});
+        }
+      }
+    }
+    return;
+  }
+});
+
+// ─── MESSAGE FORWARDING FOR ACTIVE CALLS ───
+client.on("messageCreate", async (message) => {
+  try {
+    await handleCallMessage(message);
+  } catch (err) {
+    console.error("[CallForward] Error:", err);
   }
 });
 
