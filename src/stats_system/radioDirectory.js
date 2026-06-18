@@ -40,24 +40,19 @@ async function updateRadioDirectory(client) {
     if (!guilds || guilds.length === 0) {
       description += "*No registered organisations found.*";
     } else {
-      description += "```\n";
-      description += `${"VTC Tag".padEnd(10)} | ${"VTC Name".padEnd(25)} | ${"Frequency".padEnd(12)}\n`;
-      description += `${"-".repeat(10)}-+-${"-".repeat(25)}-+-${"-".repeat(12)}\n`;
-      
       for (const g of guilds) {
         const tag = g.guild_tag || "N/A";
         const name = g.guild_name || "Unknown";
-        let freqStr = "OFFLINE";
+        let freqStr = "*OFFLINE*";
         if (g.radio_frequency !== null && g.radio_frequency !== undefined) {
-          freqStr = `${parseFloat(g.radio_frequency).toFixed(2)} MHz`;
+          freqStr = `**${parseFloat(g.radio_frequency).toFixed(2)} MHz**`;
         }
-        
-        // Handle NMC's dual display in directory if needed, but normally just display its primary DB frequency
-        description += `${tag.padEnd(10)} | ${name.substring(0, 25).padEnd(25)} | ${freqStr.padEnd(12)}\n`;
+
+        const isNmc = g.guild_tag === "[NMC]" || g.guild_tag === "NMC" || name.toLowerCase().includes("national command");
+        const extraNote = isNmc ? " *(Also receiving Help & Support on 100.00 MHz)*" : "";
+
+        description += `📡 **${name}** \`(${tag})\`\nFrequency: ${freqStr}${extraNote}\n\n`;
       }
-      description += "```\n";
-      
-      description += "\n💡 **Note:** NMC always receives transmissions on **100.00 MHz** for Help & Support requests in addition to their custom tuned frequency.";
     }
 
     const embed = new EmbedBuilder()

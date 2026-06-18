@@ -57,35 +57,51 @@ async function handleRadioMessage(message) {
     });
   }
 
-  // 2. Fetch all other approved guilds tuned to the SAME frequency
-  const { data: fetchedTargets, error: targetsError } = await supabase
-    .from("approved_guilds")
-    .select("guild_id, guild_tag, guild_name, call_channel_id::text")
-    .eq("radio_frequency", frequency)
-    .eq("is_suspended", false)
-    .neq("guild_id", senderGuildId);
-
-  if (targetsError) {
-    console.error("[RadioManager] Error fetching target guilds:", targetsError);
-    return;
-  }
-
-  let targetGuilds = fetchedTargets || [];
-
-  // NMC Dual-Frequency Exception:
-  // NMC receives on 100.00 MHz (Help & Support) in addition to its custom frequency.
   const NMC_GUILD_ID = "1448027116074434593";
-  if (parseFloat(frequency) === 100 && senderGuildId !== NMC_GUILD_ID) {
-    const hasNmc = targetGuilds.some(t => t.guild_id === NMC_GUILD_ID);
-    if (!hasNmc) {
-      const { data: nmcGuild } = await supabase
-        .from("approved_guilds")
-        .select("guild_id, guild_tag, guild_name, call_channel_id::text")
-        .eq("guild_id", NMC_GUILD_ID)
-        .maybeSingle();
+  let targetGuilds = [];
 
-      if (nmcGuild) {
-        targetGuilds.push(nmcGuild);
+  if (senderGuildId === NMC_GUILD_ID && parseFloat(frequency) === 100) {
+    // NMC Global Broadcast: Tuned to 100.00 MHz, NMC transmits to ALL approved non-suspended guilds
+    const { data: allTargets, error: allTargetsError } = await supabase
+      .from("approved_guilds")
+      .select("guild_id, guild_tag, guild_name, call_channel_id::text")
+      .eq("is_suspended", false)
+      .neq("guild_id", senderGuildId);
+
+    if (allTargetsError) {
+      console.error("[RadioManager] Error fetching all guilds for NMC global broadcast:", allTargetsError);
+      return;
+    }
+    targetGuilds = allTargets || [];
+  } else {
+    // Regular Broadcast: Fetch all other approved guilds tuned to the SAME frequency
+    const { data: fetchedTargets, error: targetsError } = await supabase
+      .from("approved_guilds")
+      .select("guild_id, guild_tag, guild_name, call_channel_id::text")
+      .eq("radio_frequency", frequency)
+      .eq("is_suspended", false)
+      .neq("guild_id", senderGuildId);
+
+    if (targetsError) {
+      console.error("[RadioManager] Error fetching target guilds:", targetsError);
+      return;
+    }
+    targetGuilds = fetchedTargets || [];
+
+    // NMC Dual-Frequency Exception:
+    // If a regular guild is tuned to 100.00 MHz, NMC also receives the transmission
+    if (parseFloat(frequency) === 100) {
+      const hasNmc = targetGuilds.some(t => t.guild_id === NMC_GUILD_ID);
+      if (!hasNmc) {
+        const { data: nmcGuild } = await supabase
+          .from("approved_guilds")
+          .select("guild_id, guild_tag, guild_name, call_channel_id::text")
+          .eq("guild_id", NMC_GUILD_ID)
+          .maybeSingle();
+
+        if (nmcGuild) {
+          targetGuilds.push(nmcGuild);
+        }
       }
     }
   }
