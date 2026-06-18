@@ -8,6 +8,7 @@
 
 const { EmbedBuilder } = require("discord.js");
 const { supabase } = require("../stats_system/supabase");
+const { updateRadioDirectory } = require("../stats_system/radioDirectory");
 
 async function setradiofrequency(interaction) {
   const guildId = interaction.guild.id;
@@ -54,6 +55,11 @@ async function setradiofrequency(interaction) {
     .setFooter({ text: "Radio Service" });
 
   await interaction.editReply({ embeds: [embed] });
+
+  // Update central radio directory in real-time
+  updateRadioDirectory(interaction.client).catch(err => 
+    console.error("[Radio] Failed to update central directory on freq change:", err)
+  );
 }
 
 module.exports = { execute: setradiofrequency };

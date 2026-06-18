@@ -39,6 +39,7 @@ const adminCmd = require("./src/commands/admin");
 const helpCmd = require("./src/commands/help");
 const radioCmd = require("./src/commands/radio");
 const { handleRadioMessage } = require("./src/radioManager");
+const { updateRadioDirectory } = require("./src/stats_system/radioDirectory");
 
 // ─── Command Router ───
 const commandHandlers = {
@@ -91,6 +92,11 @@ client.once("clientReady", async () => {
   // Update Global Webhook on Restart
   updateGlobalWebhook(client).catch(err =>
     console.error("Global webhook update on restart failed:", err)
+  );
+
+  // Initialize/Update Central Radio Directory on Restart
+  updateRadioDirectory(client).catch(err =>
+    console.error("Central radio directory update on restart failed:", err)
   );
 
   // ─── SUSPENDED GUILD SWEEP ───

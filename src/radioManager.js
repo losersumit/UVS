@@ -58,7 +58,7 @@ async function handleRadioMessage(message) {
   }
 
   // 2. Fetch all other approved guilds tuned to the SAME frequency
-  const { data: targetGuilds, error: targetsError } = await supabase
+  const { data: fetchedTargets, error: targetsError } = await supabase
     .from("approved_guilds")
     .select("guild_id, guild_tag, guild_name, call_channel_id::text")
     .eq("radio_frequency", frequency)
@@ -70,7 +70,27 @@ async function handleRadioMessage(message) {
     return;
   }
 
-  if (!targetGuilds || targetGuilds.length === 0) {
+  let targetGuilds = fetchedTargets || [];
+
+  // NMC Dual-Frequency Exception:
+  // NMC receives on 100.00 MHz (Help & Support) in addition to its custom frequency.
+  const NMC_GUILD_ID = "1448027116074434593";
+  if (parseFloat(frequency) === 100 && senderGuildId !== NMC_GUILD_ID) {
+    const hasNmc = targetGuilds.some(t => t.guild_id === NMC_GUILD_ID);
+    if (!hasNmc) {
+      const { data: nmcGuild } = await supabase
+        .from("approved_guilds")
+        .select("guild_id, guild_tag, guild_name, call_channel_id::text")
+        .eq("guild_id", NMC_GUILD_ID)
+        .maybeSingle();
+
+      if (nmcGuild) {
+        targetGuilds.push(nmcGuild);
+      }
+    }
+  }
+
+  if (targetGuilds.length === 0) {
     // No other guilds on this frequency, but we don't output anything to keep it realistic,
     // or we can optionally react/do nothing. The user said: "apex cannot see to which company the transmission went to".
     // We will react with a radio emoji to show it was sent/processed.
