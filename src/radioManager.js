@@ -32,7 +32,7 @@ async function handleRadioMessage(message) {
   if (!contentLower.startsWith("+rd")) return;
 
   // Ensure there is space or it's just +rd
-  const match = message.content.match(/^\+rd\s+(.*)/i);
+  const match = message.content.match(/^\+rd\s+([\s\S]*)/i);
   const transmissionContent = match ? match[1].trim() : "";
 
   const senderGuildId = message.guild.id;
