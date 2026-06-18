@@ -37,8 +37,8 @@ const { worstdrivers, bestdrivers } = require("./src/commands/drivers");
 const { suspendvtc, restorevtc } = require("./src/commands/vtc");
 const adminCmd = require("./src/commands/admin");
 const helpCmd = require("./src/commands/help");
-const connectCmd = require("./src/commands/connect");
-const { handleCallMessage } = require("./src/callManager");
+const radioCmd = require("./src/commands/radio");
+const { handleRadioMessage } = require("./src/radioManager");
 
 // ─── Command Router ───
 const commandHandlers = {
@@ -54,7 +54,7 @@ const commandHandlers = {
   restorevtc,
   clearstats: adminCmd.execute,
   help: helpCmd.execute,
-  connect: connectCmd.execute,
+  setradiofrequency: radioCmd.execute,
 };
 
 const client = new Client({
@@ -166,7 +166,18 @@ client.once("clientReady", async () => {
     { name: "suspendvtc", description: "Suspend a VTC from leaderboards (Owner Only)", options: [{ name: "guild_id", type: 3, description: "ID of the server", required: true }] },
     { name: "restorevtc", description: "Restore a suspended VTC to leaderboards (Owner Only)", options: [{ name: "guild_id", type: 3, description: "ID of the server", required: true }] },
     { name: "help", description: "Show bot instructions and commands" },
-    { name: "connect", description: "Establish a communication channel with another VTC" }
+    {
+      name: "setradiofrequency",
+      description: "Set the radio frequency for cross-server transmissions",
+      options: [
+        {
+          name: "frequency",
+          description: "Frequency between 100.00 and 120.00 MHz (e.g., 119.88)",
+          type: 10, // NUMBER type
+          required: true
+        }
+      ]
+    }
   ];
 
   await client.application.commands.set(commands);
@@ -206,48 +217,14 @@ client.on("interactionCreate", async (interaction) => {
     }
     return;
   }
-
-  // ─── Select Menus (Connect VTC Selector) ───
-  if (interaction.isStringSelectMenu()) {
-    try {
-      await connectCmd.handleSelectMenu(interaction);
-    } catch (err) {
-      console.error("❌ Select menu error:", err);
-      const reply = { content: "❌ An error occurred while processing your selection.", ephemeral: true };
-      if (interaction.deferred || interaction.replied) {
-        await interaction.editReply(reply).catch(() => {});
-      } else {
-        await interaction.reply(reply).catch(() => {});
-      }
-    }
-    return;
-  }
-
-  // ─── Buttons (Connect Establish / Decline / Terminate) ───
-  if (interaction.isButton()) {
-    if (interaction.customId.startsWith("connect_")) {
-      try {
-        await connectCmd.handleButton(interaction);
-      } catch (err) {
-        console.error("❌ Button error:", err);
-        const reply = { content: "❌ An error occurred while processing this action.", ephemeral: true };
-        if (interaction.deferred || interaction.replied) {
-          await interaction.editReply(reply).catch(() => {});
-        } else {
-          await interaction.reply(reply).catch(() => {});
-        }
-      }
-    }
-    return;
-  }
 });
 
-// ─── MESSAGE FORWARDING FOR ACTIVE CALLS ───
+// ─── RADIO MESSAGE MONITORING (+rd) ───
 client.on("messageCreate", async (message) => {
   try {
-    await handleCallMessage(message);
+    await handleRadioMessage(message);
   } catch (err) {
-    console.error("[CallForward] Error:", err);
+    console.error("[RadioMessage] Error:", err);
   }
 });
 
