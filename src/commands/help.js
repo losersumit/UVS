@@ -39,6 +39,8 @@ async function execute(interaction) {
       { name: "⭐ /bestdrivers [global]", value: "Rank by Clean Deliveries. Default is current server only. Set `global: True` to include all servers.", inline: true },
       { name: "🚨 /worstdrivers [global]", value: "Rank by total penalties. Default is current server only. Set `global: True` to include all servers.", inline: true },
       { name: "🛠️ /clearstats", value: "**(Owner Only)** Reset a user's stats completely.", inline: true },
+      { name: "📡 /setradiofrequency [freq]", value: "Tune into a radio frequency between 100.00 and 120.00 MHz (e.g., `119.88`).", inline: true },
+      { name: "📻 Radio Broadcast (+rd)", value: "Prefix any message in any channel with `+rd ` to broadcast it to all other VTCs sharing your frequency. The message will be received in their designated call channel.", inline: false },
       { name: "✅ Approved VTCs", value: guildList || "No VTCs found.", inline: false },
       { name: "ℹ️ /help", value: "Show this information menu.", inline: true }
     ],
