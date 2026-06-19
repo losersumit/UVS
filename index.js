@@ -36,6 +36,7 @@ const { speedlb, levellb, distancelb, timelb, networthlb } = require("./src/comm
 const { worstdrivers, bestdrivers } = require("./src/commands/drivers");
 const { suspendvtc, restorevtc } = require("./src/commands/vtc");
 const adminCmd = require("./src/commands/admin");
+const suspenduserCmd = require("./src/commands/suspenduser");
 const helpCmd = require("./src/commands/help");
 const radioCmd = require("./src/commands/radio");
 const { handleRadioMessage } = require("./src/radioManager");
@@ -54,6 +55,7 @@ const commandHandlers = {
   suspendvtc,
   restorevtc,
   clearstats: adminCmd.execute,
+  suspenduser: suspenduserCmd.execute,
   help: helpCmd.execute,
   setradiofrequency: radioCmd.execute,
 };
@@ -169,6 +171,7 @@ client.once("clientReady", async () => {
     { name: "worstdrivers", description: "View worst drivers by penalties", options: [{ name: "global", description: "Show all approved VTC members", type: 5, required: false }] },
     { name: "bestdrivers", description: "View best drivers by clean deliveries", options: [{ name: "global", description: "Show all approved VTC members", type: 5, required: false }] },
     { name: "clearstats", description: "Clear a user's stats (Owner Only)", options: [{ name: "user", description: "User to clear", type: 6, required: true }] },
+    { name: "suspenduser", description: "Suspend a user and completely remove their contributions (Owner Only)", options: [{ name: "user", description: "User to suspend", type: 6, required: true }] },
     { name: "suspendvtc", description: "Suspend a VTC from leaderboards (Owner Only)", options: [{ name: "guild_id", type: 3, description: "ID of the server", required: true }] },
     { name: "restorevtc", description: "Restore a suspended VTC to leaderboards (Owner Only)", options: [{ name: "guild_id", type: 3, description: "ID of the server", required: true }] },
     { name: "help", description: "Show bot instructions and commands" },
