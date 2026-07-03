@@ -52,7 +52,22 @@ async function getOrCreatePlayer(discordId, username, displayName, guildId) {
     if (updatedPlayer) player = updatedPlayer;
   }
 
-  // Existing player — NO GUILD LOCKING
+  // Existing player — GUILD LOCK: prevent logging in another company's channel
+  if (player.guild_id && player.guild_id !== guildId) {
+    const { data: playerGuild } = await supabase
+      .from("approved_guilds")
+      .select("guild_tag, guild_name")
+      .eq("guild_id", player.guild_id)
+      .single();
+
+    const companyName = playerGuild?.guild_name || "your company";
+    const companyTag  = playerGuild?.guild_tag  || player.guild_id;
+
+    throw new Error(
+      `🚫 You are a driver at **${companyName}**.\nPlease log your job in **${companyTag}** — not here.`
+    );
+  }
+
   return player;
 }
 
