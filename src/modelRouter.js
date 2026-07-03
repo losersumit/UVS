@@ -3,7 +3,7 @@
  * MODULE: modelRouter.js
  * PURPOSE: Handles API connections to the Groq LLM inference engine. Serves
  *          as the routing layer for AI features, including Vision and Reasoning.
- *          Implements model fallback (Scout -> Maverick) for stability.
+ *          Implements model fallback (Qwen -> Scout) for stability.
  * ============================================================================
  */
 // .uvs/src/modelRouter.js
@@ -35,23 +35,23 @@ async function runVision(prompt, base64Image, model) {
 }
 
 async function extractWithFallback(prompt, base64Image) {
-  // 1️⃣ Primary — Scout
+  // 1️⃣ Primary — Qwen
+  try {
+    return await runVision(
+      prompt,
+      base64Image,
+      "qwen/qwen3.6-27b"
+    );
+  } catch (err) {
+    console.warn("Qwen failed, trying Scout...");
+  }
+
+  // 2️⃣ Fallback — Scout
   try {
     return await runVision(
       prompt,
       base64Image,
       "meta-llama/llama-4-scout-17b-16e-instruct"
-    );
-  } catch (err) {
-    console.warn("Scout failed, trying Maverick...");
-  }
-
-  // 2️⃣ Fallback — Maverick
-  try {
-    return await runVision(
-      prompt,
-      base64Image,
-      "meta-llama/llama-4-maverick-17b-128e-instruct"
     );
   } catch (err) {
     console.error("Vision fallback failed:", err.message);
