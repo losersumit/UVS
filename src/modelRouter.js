@@ -11,12 +11,35 @@
 const Groq = require("groq-sdk");
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
+function parseMaybeJson(content) {
+  // Strip reasoning block if present
+  let cleaned = content.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
+  
+  // Strip markdown code fences if present
+  cleaned = cleaned.replace(/```json\s*([\s\S]*?)\s*```/g, "$1").trim();
+  cleaned = cleaned.replace(/```\s*([\s\S]*?)\s*```/g, "$1").trim();
+
+  try {
+    return JSON.parse(cleaned);
+  } catch (e) {
+    const match = cleaned.match(/\{[\s\S]*\}/);
+    if (match) {
+      try {
+        return JSON.parse(match[0]);
+      } catch (innerErr) {
+        throw new Error("Extracted text is not valid JSON: " + match[0]);
+      }
+    }
+    throw e;
+  }
+}
+
 async function runVision(prompt, base64Image, model) {
-  const res = await groq.chat.completions.create({
+  const isQwen = model.startsWith("qwen");
+  const options = {
     model,
     temperature: 0.1,
-    max_tokens: 512,
-    response_format: { type: "json_object" },
+    max_tokens: isQwen ? 2048 : 512, // Qwen needs extra tokens to output the thinking block first
     messages: [
       {
         role: "user",
@@ -29,9 +52,15 @@ async function runVision(prompt, base64Image, model) {
         ]
       }
     ]
-  });
+  };
 
-  return JSON.parse(res.choices[0].message.content);
+  // Only use response_format JSON mode for non-Qwen models to avoid 400 validation errors on Qwen reasoning models
+  if (!isQwen) {
+    options.response_format = { type: "json_object" };
+  }
+
+  const res = await groq.chat.completions.create(options);
+  return parseMaybeJson(res.choices[0].message.content);
 }
 
 async function extractWithFallback(prompt, base64Image) {
