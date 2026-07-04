@@ -74,24 +74,42 @@ async function runVision(prompt, imageSource, model, imageMode = "base64") {
   return parseMaybeJson(res.choices[0].message.content);
 }
 
+// Retry a vision call once after a short delay on network/connection errors.
+// Groq occasionally drops connections transiently — one retry recovers them.
+async function runVisionWithRetry(prompt, imageSource, model, imageMode) {
+  try {
+    return await runVision(prompt, imageSource, model, imageMode);
+  } catch (err) {
+    const isNetworkError = err.message?.includes("Premature close") ||
+                           err.message?.includes("fetch failed") ||
+                           err.message?.includes("ECONNRESET") ||
+                           err.message?.includes("Invalid response body");
+    if (!isNetworkError) throw err; // don't retry API errors (400, 401, etc.)
+
+    console.warn(`[ModelRouter] Network error on ${model}, retrying in 1.5s...`);
+    await new Promise(r => setTimeout(r, 1500));
+    return await runVision(prompt, imageSource, model, imageMode);
+  }
+}
+
 /**
  * extractWithFallback
  * @param {string} prompt
- * @param {string} base64Image  — always provided; Scout will use the URL instead
- * @param {string} [imageUrl]   — original Discord CDN URL, used by Scout to avoid 4MB base64 limit
+ * @param {string} base64Image  — base64-encoded image (used by both models)
+ * NOTE: We do NOT pass Discord CDN URLs to Groq — they are ephemeral/IP-restricted
+ *       and cause "Premature close" errors when Groq's servers try to fetch them.
  */
-async function extractWithFallback(prompt, base64Image, imageUrl) {
-  // 1️⃣ Primary — Scout via URL (fast, stable; 20MB URL limit, no base64 cap issue)
+async function extractWithFallback(prompt, base64Image) {
+  // 1️⃣ Primary — Scout via base64 (fast; 4MB request cap, well within normal screenshot sizes)
   try {
-    if (!imageUrl) throw new Error("No image URL available for Scout.");
-    return await runVision(prompt, imageUrl, "meta-llama/llama-4-scout-17b-16e-instruct", "url");
+    return await runVisionWithRetry(prompt, base64Image, "meta-llama/llama-4-scout-17b-16e-instruct", "base64");
   } catch (err) {
     console.warn("Scout failed, trying Qwen...", err.message);
   }
 
   // 2️⃣ Fallback — Qwen via base64
   try {
-    return await runVision(prompt, base64Image, "qwen/qwen3.6-27b", "base64");
+    return await runVisionWithRetry(prompt, base64Image, "qwen/qwen3.6-27b", "base64");
   } catch (err) {
     console.error("Vision fallback failed:", err.message);
     return null;
