@@ -3,7 +3,7 @@
 // This file ONLY detects valid screenshot messages
 
 const crypto = require("crypto");
-const { getOrCreatePlayer, applyRunStats } = require("./statsService");
+const { getOrCreatePlayer, applyRunStats, checkPlayerGuild } = require("./statsService");
 const { extractStatsWithGemini } = require("./geminiVision");
 const axios = require("axios");
 const { supabase } = require("./supabase");
@@ -63,6 +63,9 @@ function registerScreenshotListener(client) {
 
       // VALID screenshot detected
       await message.react("⏳");
+
+      // Verify player company/guild lock BEFORE downloading, duplicate hashing, or calling OCR
+      await checkPlayerGuild(message.author.id, message.guild.id);
 
       const imgResp = await axios.get(attachment.url, { responseType: "arraybuffer" });
 
@@ -146,7 +149,8 @@ function registerScreenshotListener(client) {
         await message.reactions.cache.get("⏳")?.remove();
         await message.react("❌");
         // Reply with the error message so you know what went wrong (e.g. Database Error)
-        await message.reply(`❌ Error processing run: ${err.message}`).catch(() => { });
+        const errorText = err.message.startsWith("🚫") ? err.message : `❌ Error processing run: ${err.message}`;
+        await message.reply(errorText).catch(() => { });
       } catch (cleanupErr) {
         // failed to react/reply, just log it
       }

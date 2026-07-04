@@ -3,6 +3,29 @@ const { supabase } = require("./supabase");
 const { validateRun } = require("../anticheat");
 const { updateLeaderboard, updateGlobalWebhook } = require("./leaderboardService");
 
+async function checkPlayerGuild(discordId, targetGuildId) {
+  const { data: player } = await supabase
+    .from("players")
+    .select("guild_id")
+    .eq("discord_id", discordId)
+    .maybeSingle();
+
+  if (player && player.guild_id && player.guild_id !== targetGuildId) {
+    const { data: playerGuild } = await supabase
+      .from("approved_guilds")
+      .select("guild_tag, guild_name")
+      .eq("guild_id", player.guild_id)
+      .maybeSingle();
+
+    const companyName = playerGuild?.guild_name || "your company";
+    const companyTag  = playerGuild?.guild_tag  || player.guild_id;
+
+    throw new Error(
+      `🚫 You are a driver at **${companyName}**.\nPlease log your job in **${companyTag}** — not here.`
+    );
+  }
+}
+
 async function getOrCreatePlayer(discordId, username, displayName, guildId) {
   // Check if player already exists (GLOBAL - not per-server)
   let { data: player } = await supabase
@@ -52,21 +75,8 @@ async function getOrCreatePlayer(discordId, username, displayName, guildId) {
     if (updatedPlayer) player = updatedPlayer;
   }
 
-  // Existing player — GUILD LOCK: prevent logging in another company's channel
-  if (player.guild_id && player.guild_id !== guildId) {
-    const { data: playerGuild } = await supabase
-      .from("approved_guilds")
-      .select("guild_tag, guild_name")
-      .eq("guild_id", player.guild_id)
-      .single();
-
-    const companyName = playerGuild?.guild_name || "your company";
-    const companyTag  = playerGuild?.guild_tag  || player.guild_id;
-
-    throw new Error(
-      `🚫 You are a driver at **${companyName}**.\nPlease log your job in **${companyTag}** — not here.`
-    );
-  }
+  // Existing player — GUILD LOCK check
+  await checkPlayerGuild(discordId, guildId);
 
   return player;
 }
@@ -256,4 +266,4 @@ async function applyRunStats(playerId, ocr, client) {
   return { starsEarned };
 }
 
-module.exports = { getOrCreatePlayer, applyRunStats };
+module.exports = { getOrCreatePlayer, applyRunStats, checkPlayerGuild };
