@@ -8,7 +8,7 @@ async function execute(interaction) {
     return interaction.reply({ content: "❌ Permission denied.", ephemeral: true });
   }
 
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply();
 
   const target = interaction.options.getUser("user");
   
