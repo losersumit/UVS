@@ -9,7 +9,10 @@
 // .uvs/src/modelRouter.js
 
 const Groq = require("groq-sdk");
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+const groq = new Groq({
+  apiKey: process.env.GROQ_API_KEY,
+  timeout: 60 * 1000, // 60s — Railway has higher latency than local; default 10s times out on large images
+});
 
 function parseMaybeJson(content) {
   // Strip reasoning block if present
