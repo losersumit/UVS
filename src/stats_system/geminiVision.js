@@ -15,8 +15,9 @@ function parseGameNumber(val) {
 
 /**
  * @param {Buffer} imageBuffer  — already-downloaded image bytes (from screenshotListener)
+ * @param {string} imageUrl     — original Discord CDN URL (passed to Scout fallback)
  */
-async function extractStatsWithGemini(imageBuffer) {
+async function extractStatsWithGemini(imageBuffer, imageUrl) {
   try {
     // Convert the buffer we already have — no second HTTP download needed
     const base64Image = imageBuffer.toString("base64");
@@ -43,7 +44,7 @@ If this is NOT a valid "Job Finished" screen, return:
 { "valid": false, "sarcasm": "A short, funny roast about why this isn't a truck job result." }
 `;
 
-    const result = await extractWithFallback(prompt, base64Image);
+    const result = await extractWithFallback(prompt, base64Image, imageUrl);
     
     // Basic safety parsing
     if (result && result.valid) {

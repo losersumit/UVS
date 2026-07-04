@@ -79,7 +79,7 @@ function registerScreenshotListener(client) {
       // is simply discarded. Correctness is fully preserved.
       const [{ data: existing }, ocrResult] = await Promise.all([
         supabase.from("runs").select("id").eq("image_hash", imageHash).limit(1),
-        extractStatsWithGemini(imageBuffer)
+        extractStatsWithGemini(imageBuffer, attachment.url)
       ]);
       // ────────────────────────────────────────────────────────────────────────
 
