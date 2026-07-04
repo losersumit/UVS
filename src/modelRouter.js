@@ -34,54 +34,64 @@ function parseMaybeJson(content) {
   }
 }
 
-async function runVision(prompt, base64Image, model) {
+/**
+ * runVision — calls a Groq vision model.
+ * @param {string} prompt
+ * @param {string} imageSource  — base64 string OR a public https:// URL
+ * @param {string} model
+ * @param {"base64"|"url"} imageMode  — how to pass the image to the API
+ */
+async function runVision(prompt, imageSource, model, imageMode = "base64") {
   const isQwen = model.startsWith("qwen");
+
+  // Build the image content part based on the delivery mode
+  const imagePart = imageMode === "url"
+    ? { type: "image_url", image_url: { url: imageSource } }
+    : { type: "image_url", image_url: { url: `data:image/jpeg;base64,${imageSource}` } };
+
   const options = {
     model,
     temperature: 0.1,
-    max_tokens: isQwen ? 2048 : 512, // Qwen needs extra tokens to output the thinking block first
+    // Qwen needs extra tokens to emit its <think> block before the JSON
+    max_tokens: isQwen ? 2048 : 512,
     messages: [
       {
         role: "user",
         content: [
           { type: "text", text: prompt },
-          {
-            type: "image_url",
-            image_url: { url: `data:image/jpeg;base64,${base64Image}` }
-          }
+          imagePart
         ]
       }
     ]
   };
 
-  // Only use response_format JSON mode for non-Qwen models to avoid 400 validation errors on Qwen reasoning models
+  // JSON mode only on non-Qwen — Qwen reasoning models return a 400 with it
   if (!isQwen) {
     options.response_format = { type: "json_object" };
   }
 
-  const res = await groq.chat.completions.create(options);
+  const res = await groq.chat.completions.create(options, { timeout: 30000 });
   return parseMaybeJson(res.choices[0].message.content);
 }
 
-async function extractWithFallback(prompt, base64Image) {
-  // 1️⃣ Primary — Qwen
+/**
+ * extractWithFallback
+ * @param {string} prompt
+ * @param {string} base64Image  — always provided; Scout will use the URL instead
+ * @param {string} [imageUrl]   — original Discord CDN URL, used by Scout to avoid 4MB base64 limit
+ */
+async function extractWithFallback(prompt, base64Image, imageUrl) {
+  // 1️⃣ Primary — Scout via URL (fast, stable; 20MB URL limit, no base64 cap issue)
   try {
-    return await runVision(
-      prompt,
-      base64Image,
-      "qwen/qwen3.6-27b"
-    );
+    if (!imageUrl) throw new Error("No image URL available for Scout.");
+    return await runVision(prompt, imageUrl, "meta-llama/llama-4-scout-17b-16e-instruct", "url");
   } catch (err) {
-    console.warn("Qwen failed, trying Scout...");
+    console.warn("Scout failed, trying Qwen...", err.message);
   }
 
-  // 2️⃣ Fallback — Scout
+  // 2️⃣ Fallback — Qwen via base64
   try {
-    return await runVision(
-      prompt,
-      base64Image,
-      "meta-llama/llama-4-scout-17b-16e-instruct"
-    );
+    return await runVision(prompt, base64Image, "qwen/qwen3.6-27b", "base64");
   } catch (err) {
     console.error("Vision fallback failed:", err.message);
     return null;

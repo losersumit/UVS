@@ -1,5 +1,4 @@
 // stats_system/geminiVision.js
-const axios = require("axios");
 const { extractWithFallback } = require("../modelRouter");
 
 function parseGameNumber(val) {
@@ -14,11 +13,14 @@ function parseGameNumber(val) {
   return isNaN(num) ? 0 : num;
 }
 
-async function extractStatsWithGemini(imageUrl) {
+/**
+ * @param {Buffer} imageBuffer  — already-downloaded image bytes (from screenshotListener)
+ * @param {string} imageUrl     — original Discord CDN URL (passed to Scout fallback)
+ */
+async function extractStatsWithGemini(imageBuffer, imageUrl) {
   try {
-    // 1. Download image as Base64
-    const response = await axios.get(imageUrl, { responseType: "arraybuffer" });
-    const base64Image = Buffer.from(response.data).toString("base64");
+    // Convert the buffer we already have — no second HTTP download needed
+    const base64Image = imageBuffer.toString("base64");
 
     const prompt = `
 You are an OCR system for the game Truckers of Europe 3. 
@@ -42,7 +44,7 @@ If this is NOT a valid "Job Finished" screen, return:
 { "valid": false, "sarcasm": "A short, funny roast about why this isn't a truck job result." }
 `;
 
-    const result = await extractWithFallback(prompt, base64Image);
+    const result = await extractWithFallback(prompt, base64Image, imageUrl);
     
     // Basic safety parsing
     if (result && result.valid) {
