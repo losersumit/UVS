@@ -3,21 +3,28 @@
  * MODULE: modelRouter.js
  * PURPOSE: Handles API connections to the Groq LLM inference engine. Serves
  *          as the routing layer for AI features, including Vision and Reasoning.
- *          Implements model fallback (Qwen -> Scout) for stability.
+ *          Implements model fallback (Scout -> Qwen) for stability.
+ *
+ * NOTE: Vision calls use axios.post directly (not the groq-sdk) — this matches
+ *       the proven pattern used by the worker bot and avoids the fetch-based
+ *       timeout issues the SDK has on Railway for large image payloads.
  * ============================================================================
  */
 // .uvs/src/modelRouter.js
 
-const Groq = require("groq-sdk");
-const groq = new Groq({
-  apiKey: process.env.GROQ_API_KEY,
-  timeout: 60 * 1000, // 60s — Railway has higher latency than local; default 10s times out on large images
-});
+const axios = require("axios");
+const Groq  = require("groq-sdk");
+
+// SDK is only used for text-only reasoning (no large payloads, no timeout issue)
+const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+
+const GROQ_ENDPOINT = "https://api.groq.com/openai/v1/chat/completions";
+const VISION_TIMEOUT_MS = 30_000; // 30s — consistent with the worker bot
 
 function parseMaybeJson(content) {
   // Strip reasoning block if present
   let cleaned = content.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
-  
+
   // Strip markdown code fences if present
   cleaned = cleaned.replace(/```json\s*([\s\S]*?)\s*```/g, "$1").trim();
   cleaned = cleaned.replace(/```\s*([\s\S]*?)\s*```/g, "$1").trim();
@@ -38,21 +45,20 @@ function parseMaybeJson(content) {
 }
 
 /**
- * runVision — calls a Groq vision model.
- * @param {string} prompt
- * @param {string} imageSource  — base64 string OR a public https:// URL
- * @param {string} model
- * @param {"base64"|"url"} imageMode  — how to pass the image to the API
+ * runVision — calls a Groq vision model via raw axios (Railway-safe).
+ * @param {string}          prompt
+ * @param {string}          imageSource  — base64 string OR a public https:// URL
+ * @param {string}          model
+ * @param {"base64"|"url"}  imageMode    — how to pass the image to the API
  */
 async function runVision(prompt, imageSource, model, imageMode = "base64") {
   const isQwen = model.startsWith("qwen");
 
-  // Build the image content part based on the delivery mode
   const imagePart = imageMode === "url"
     ? { type: "image_url", image_url: { url: imageSource } }
     : { type: "image_url", image_url: { url: `data:image/jpeg;base64,${imageSource}` } };
 
-  const options = {
+  const payload = {
     model,
     temperature: 0.1,
     // Qwen needs extra tokens to emit its <think> block before the JSON
@@ -70,18 +76,25 @@ async function runVision(prompt, imageSource, model, imageMode = "base64") {
 
   // JSON mode only on non-Qwen — Qwen reasoning models return a 400 with it
   if (!isQwen) {
-    options.response_format = { type: "json_object" };
+    payload.response_format = { type: "json_object" };
   }
 
-  const res = await groq.chat.completions.create(options, { timeout: 30000 });
-  return parseMaybeJson(res.choices[0].message.content);
+  const res = await axios.post(GROQ_ENDPOINT, payload, {
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${process.env.GROQ_API_KEY}`
+    },
+    timeout: VISION_TIMEOUT_MS
+  });
+
+  return parseMaybeJson(res.data.choices[0].message.content);
 }
 
 /**
  * extractWithFallback
- * @param {string} prompt
- * @param {string} base64Image  — always provided; Scout will use the URL instead
- * @param {string} [imageUrl]   — original Discord CDN URL, used by Scout to avoid 4MB base64 limit
+ * @param {string}  prompt
+ * @param {string}  base64Image  — always provided; Scout uses the URL instead
+ * @param {string}  [imageUrl]   — original Discord CDN URL, used by Scout (URL mode)
  */
 async function extractWithFallback(prompt, base64Image, imageUrl) {
   // 1️⃣ Primary — Scout via URL (fast, stable; 20MB URL limit, no base64 cap issue)
@@ -101,6 +114,7 @@ async function extractWithFallback(prompt, base64Image, imageUrl) {
   }
 }
 
+// Text-only reasoning — groq-sdk is fine here (no large payloads)
 async function analyzeRunsWithReasoning(prompt) {
   try {
     if (!process.env.GROQ_API_KEY) {
@@ -110,15 +124,10 @@ async function analyzeRunsWithReasoning(prompt) {
 
     const res = await groq.chat.completions.create({
       model: "openai/gpt-oss-120b",
-      temperature: 0.2, // Low temp for more factual analysis
+      temperature: 0.2,
       max_completion_tokens: 4096,
       response_format: { type: "json_object" },
-      messages: [
-        {
-          role: "user",
-          content: prompt
-        }
-      ]
+      messages: [{ role: "user", content: prompt }]
     });
     return JSON.parse(res.choices[0].message.content);
   } catch (err) {
@@ -128,3 +137,4 @@ async function analyzeRunsWithReasoning(prompt) {
 }
 
 module.exports = { extractWithFallback, analyzeRunsWithReasoning };
+
