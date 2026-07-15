@@ -40,6 +40,7 @@ const suspenduserCmd = require("./src/commands/suspenduser");
 const changeguildCmd = require("./src/commands/changeguild");
 const helpCmd = require("./src/commands/help");
 const radioCmd = require("./src/commands/radio");
+const radiochannelCmd = require("./src/commands/radiochannel");
 const { handleRadioMessage } = require("./src/radioManager");
 const { updateRadioDirectory } = require("./src/stats_system/radioDirectory");
 
@@ -60,6 +61,7 @@ const commandHandlers = {
   changeguild: changeguildCmd.execute,
   help: helpCmd.execute,
   setradiofrequency: radioCmd.execute,
+  setradiochannel: radiochannelCmd.execute,
 };
 
 const client = new Client({
@@ -187,6 +189,19 @@ client.once("clientReady", async () => {
           description: "Frequency between 100.00 and 120.00 MHz (e.g., 119.88)",
           type: 10, // NUMBER type
           required: true
+        }
+      ]
+    },
+    {
+      name: "setradiochannel",
+      description: "Set the channel where incoming radio transmissions are delivered",
+      options: [
+        {
+          name: "channel",
+          description: "The text channel UVS has access to",
+          type: 7, // CHANNEL type
+          required: true,
+          channel_types: [0, 5, 10, 11, 12] // GuildText, GuildAnnouncement, threads
         }
       ]
     }
