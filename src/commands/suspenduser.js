@@ -84,18 +84,43 @@ async function execute(interaction) {
     net_worth:            0
   }).eq("player_id", playerId);
 
-  // ── 5. Insert into suspended_users (upsert in case they were already suspended) ──
+  // ── 5. Insert or Update suspended_users ──
   const now = new Date();
-  const { error: suspendErr } = await supabase.from("suspended_users").upsert({
-    player_id:    playerId,
-    discord_id:   target.id,
-    username:     target.username,
-    reason,
-    suspended_at: now.toISOString()
-  }, { onConflict: "discord_id" });
+  
+  // Check if already suspended
+  const { data: existingSuspension } = await supabase
+    .from("suspended_users")
+    .select("id")
+    .eq("discord_id", target.id)
+    .maybeSingle();
+
+  let suspendErr;
+  if (existingSuspension) {
+    const { error } = await supabase
+      .from("suspended_users")
+      .update({
+        player_id:    playerId,
+        username:     target.username,
+        reason,
+        suspended_at: now.toISOString()
+      })
+      .eq("discord_id", target.id);
+    suspendErr = error;
+  } else {
+    const { error } = await supabase
+      .from("suspended_users")
+      .insert({
+        player_id:    playerId,
+        discord_id:   target.id,
+        username:     target.username,
+        reason,
+        suspended_at: now.toISOString()
+      });
+    suspendErr = error;
+  }
 
   if (suspendErr) {
-    console.error("Failed to insert into suspended_users:", suspendErr);
+    console.error("Failed to record suspension:", suspendErr);
     return interaction.editReply(`❌ Failed to record suspension: ${suspendErr.message}`);
   }
 
