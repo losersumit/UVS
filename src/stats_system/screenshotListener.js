@@ -9,6 +9,7 @@ const axios = require("axios");
 const { supabase } = require("./supabase");
 const { getGuildConfig } = require("./guildConfig");
 const { mirrorJobLog } = require("./jobLogMirror");
+const { isUserSuspended, alertSuspendedAttempt } = require("./suspendedUsers");
 
 // image extensions we accept
 const VALID_IMAGE_TYPES = ["png", "jpg", "jpeg", "webp"];
@@ -33,6 +34,21 @@ function registerScreenshotListener(client) {
 
       // only allow screenshots in the defined channel
       if (!guildConfig.screenshot_channel_id || message.channel.id !== guildConfig.screenshot_channel_id) return;
+
+      // ══ SUSPENSION CHECK ══
+      // Must run before mirroring, reactions, or any processing.
+      const suspended = await isUserSuspended(message.author.id);
+      if (suspended) {
+        await message.reply("You are suspended.").catch(() => {});
+        await message.react("❌").catch(() => {});
+        alertSuspendedAttempt(
+          client,
+          message.author.id,
+          message.author.username,
+          message.guild?.name || "Unknown Server"
+        ).catch(err => console.error("[SuspendedAlert] Alert failed:", err));
+        return;
+      }
 
       // ══ PRIORITY #1: Mirror to NMC master job-log channel ══
       // Runs BEFORE deletion, reactions, or any validation.

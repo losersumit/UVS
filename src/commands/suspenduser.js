@@ -2,6 +2,13 @@ const { supabase } = require("../stats_system/supabase");
 const { isOwner } = require("../owner");
 const { updateLeaderboard, updateGlobalWebhook } = require("../stats_system/leaderboardService");
 
+/**
+ * Formats a Date object to IST (GMT+5:30) locale string.
+ */
+function toIST(date) {
+  return date.toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }) + " IST";
+}
+
 async function execute(interaction) {
   if (!isOwner(interaction.user.id)) {
     return interaction.reply({ content: "❌ Permission denied.", ephemeral: true });
@@ -10,11 +17,12 @@ async function execute(interaction) {
   await interaction.deferReply({ ephemeral: true });
 
   const target = interaction.options.getUser("user");
-  
-  // Find player
+  const reason = interaction.options.getString("reason");
+
+  // ── 1. Find player ──
   const { data: player, error: playerErr } = await supabase
     .from("players")
-    .select("id, guild_id")
+    .select("id, guild_id, username")
     .eq("discord_id", target.id)
     .single();
 
@@ -25,7 +33,7 @@ async function execute(interaction) {
   const playerId = player.id;
   const guildId = player.guild_id;
 
-  // Calculate user's total income and run count
+  // ── 2. Calculate total income & runs from the runs table ──
   const { data: runsData, error: runsQueryErr } = await supabase
     .from("runs")
     .select("income")
@@ -36,10 +44,12 @@ async function execute(interaction) {
     return interaction.editReply(`❌ Failed to retrieve user runs: ${runsQueryErr.message}`);
   }
 
-  const totalIncome = runsData ? runsData.reduce((sum, run) => sum + (Number(run.income) || 0), 0) : 0;
+  const totalIncome = runsData
+    ? runsData.reduce((sum, run) => sum + (Number(run.income) || 0), 0)
+    : 0;
   const totalRuns = runsData ? runsData.length : 0;
 
-  // Update company/guild stats if applicable
+  // ── 3. Deduct user's contribution from guild net worth & run count ──
   if (guildId && totalRuns > 0) {
     const { data: guild } = await supabase
       .from("approved_guilds")
@@ -50,7 +60,6 @@ async function execute(interaction) {
     if (guild) {
       const newNetWorth = Math.max(0, (Number(guild.net_worth) || 0) - totalIncome);
       const newRuns = Math.max(0, (Number(guild.runs) || 0) - totalRuns);
-
       await supabase
         .from("approved_guilds")
         .update({ net_worth: newNetWorth, runs: newRuns })
@@ -58,18 +67,41 @@ async function execute(interaction) {
     }
   }
 
-  // Delete dependencies in correct database order
-  await supabase.from("run_rejections").delete().eq("player_id", playerId);
-  await supabase.from("runs").delete().eq("player_id", playerId);
-  await supabase.from("player_stats").delete().eq("player_id", playerId);
-  await supabase.from("players").delete().eq("id", playerId);
+  // ── 4. Zero out player stats (row stays, all values reset to 0) ──
+  await supabase.from("player_stats").update({
+    total_distance_km:    0,
+    total_time_minutes:   0,
+    best_avg_speed_kmph:  0,
+    clean_deliveries:     0,
+    level:                0,
+    xp:                   0,
+    runs:                 0,
+    total_damage_penalty: 0,
+    total_time_penalty:   0,
+    total_score:          0,
+    total_stars:          0,
+    wallet:               0,
+    net_worth:            0
+  }).eq("player_id", playerId);
 
-  // Trigger leaderboard refresh
+  // ── 5. Insert into suspended_users (upsert in case they were already suspended) ──
+  const now = new Date();
+  const { error: suspendErr } = await supabase.from("suspended_users").upsert({
+    player_id:    playerId,
+    discord_id:   target.id,
+    username:     target.username,
+    reason,
+    suspended_at: now.toISOString()
+  }, { onConflict: "discord_id" });
+
+  if (suspendErr) {
+    console.error("Failed to insert into suspended_users:", suspendErr);
+    return interaction.editReply(`❌ Failed to record suspension: ${suspendErr.message}`);
+  }
+
+  // ── 6. Refresh leaderboards ──
   try {
-    const { data: allGuilds } = await supabase
-      .from("approved_guilds")
-      .select("guild_id");
-
+    const { data: allGuilds } = await supabase.from("approved_guilds").select("guild_id");
     if (allGuilds) {
       for (const guild of allGuilds) {
         updateLeaderboard(interaction.client, guild.guild_id).catch(err =>
@@ -77,7 +109,6 @@ async function execute(interaction) {
         );
       }
     }
-
     if (guildId) {
       updateGlobalWebhook(interaction.client, guildId).catch(err =>
         console.error(`Global webhook trigger failed for ${guildId}:`, err)
@@ -87,7 +118,11 @@ async function execute(interaction) {
     console.error("Failed to trigger leaderboard updates after suspension:", err);
   }
 
-  return interaction.editReply(`✅ Successfully suspended **${target.username}** and completely removed all their contributions.`);
+  return interaction.editReply(
+    `✅ **${target.username}** has been suspended and their stats have been cleared.\n` +
+    `📋 **Reason:** ${reason}\n` +
+    `🕐 **Suspended at:** ${toIST(now)}`
+  );
 }
 
 module.exports = { execute };
