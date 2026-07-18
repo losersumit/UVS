@@ -43,7 +43,7 @@ function getNextApiKey() {
 }
 
 function parseMaybeJson(content) {
-  // Strip reasoning block if present (handles both closed and unclosed <think> tags)
+  // Strip reasoning block if present (handles both closed and unclosed <think> tags) I did it 
   let cleaned = content.replace(/<think>[\s\S]*?(?:<\/think>|$)/g, "").trim();
 
   // Strip markdown code fences if present
