@@ -11,6 +11,8 @@ const GROQ_KEYS = [
   process.env.GROQ_API_KEY_FOUR,
   process.env.GROQ_API_KEY_FIVE,
   process.env.GROQ_API_KEY_SIX,
+  process.env.GROQ_API_KEY_SEVEN,
+  process.env.GROQ_API_KEY_EIGHT,
 ].filter(Boolean);
 
 let keyIndex = 0;

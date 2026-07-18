@@ -30,6 +30,8 @@ const GROQ_KEYS = [
   process.env.GROQ_API_KEY_FOUR,
   process.env.GROQ_API_KEY_FIVE,
   process.env.GROQ_API_KEY_SIX,
+  process.env.GROQ_API_KEY_SEVEN,
+  process.env.GROQ_API_KEY_EIGHT,
 ].filter(Boolean);
 
 let keyIndex = 0;
@@ -41,8 +43,8 @@ function getNextApiKey() {
 }
 
 function parseMaybeJson(content) {
-  // Strip reasoning block if present
-  let cleaned = content.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
+  // Strip reasoning block if present (handles both closed and unclosed <think> tags)
+  let cleaned = content.replace(/<think>[\s\S]*?(?:<\/think>|$)/g, "").trim();
 
   // Strip markdown code fences if present
   cleaned = cleaned.replace(/```json\s*([\s\S]*?)\s*```/g, "$1").trim();
@@ -59,72 +61,83 @@ function parseMaybeJson(content) {
         throw new Error("Extracted text is not valid JSON: " + match[0]);
       }
     }
-    throw e;
+    throw new Error(`Failed to parse JSON. Content was: ${content.slice(0, 200)}... Error: ${e.message}`);
   }
 }
 
-/**
- * runVision — calls a Groq vision model via raw axios (Railway-safe).
- * @param {string}          prompt
- * @param {string}          imageSource  — base64 string OR a public https:// URL
- * @param {string}          model
- * @param {"base64"|"url"}  imageMode    — how to pass the image to the API
- */
-async function runVision(prompt, imageSource, model, imageMode = "base64") {
-  const isQwen = model.startsWith("qwen");
+// ─── GEMINI KEYS ROTATION ───
+const GEMINI_KEYS = [
+  process.env.GEMINI_API_KEY,
+  process.env.GEMINI_API_KEY_ONE,
+  process.env.GEMINI_API_KEY_TWO,
+  process.env.GEMINI_API_KEY_THREE,
+  process.env.GEMINI_API_KEY_FOUR,
+  process.env.GEMINI_API_KEY_FIVE,
+  process.env.GEMINI_API_KEY_SIX,
+  process.env.GEMINI_API_KEY_SEVEN,
+  process.env.GEMINI_API_KEY_EIGHT,
+].filter(Boolean);
 
-  const imagePart = imageMode === "url"
-    ? { type: "image_url", image_url: { url: imageSource } }
-    : { type: "image_url", image_url: { url: `data:image/jpeg;base64,${imageSource}` } };
-
-  const payload = {
-    model,
-    temperature: 0.1,
-    // Qwen needs extra tokens to emit its <think> block before the JSON
-    max_tokens: isQwen ? 2048 : 512,
-    messages: [
-      {
-        role: "user",
-        content: [
-          { type: "text", text: prompt },
-          imagePart
-        ]
-      }
-    ]
-  };
-
-  // JSON mode only on non-Qwen — Qwen reasoning models return a 400 with it
-  if (!isQwen) {
-    payload.response_format = { type: "json_object" };
-  }
-
-  const apiKey = getNextApiKey() || process.env.GROQ_API_KEY;
-
-  const res = await axios.post(GROQ_ENDPOINT, payload, {
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${apiKey}`
-    },
-    timeout: VISION_TIMEOUT_MS
-  });
-
-  return parseMaybeJson(res.data.choices[0].message.content);
+let geminiKeyIndex = 0;
+function getNextGeminiApiKey() {
+  if (GEMINI_KEYS.length === 0) return null;
+  const key = GEMINI_KEYS[geminiKeyIndex % GEMINI_KEYS.length];
+  geminiKeyIndex++;
+  return key;
 }
 
+const { GoogleGenAI } = require("@google/genai");
+
 /**
- * extractWithFallback
+ * extractWithFallback — Calls Google Gemini API for fast, high-limit OCR/Vision.
+ * Runs key rotation in round-robin and retries other keys on quota/failures.
  * @param {string}  prompt
- * @param {string}  base64Image  — always provided; Scout uses the URL instead
- * @param {string}  [imageUrl]   — original Discord CDN URL, used by Scout (URL mode)
+ * @param {string}  base64Image
+ * @param {string}  [imageUrl]
  */
 async function extractWithFallback(prompt, base64Image, imageUrl) {
-  // Use Qwen 3.6 27B as primary/only model because Llama has been decommissioned
-  try {
-    return await runVision(prompt, base64Image, "qwen/qwen3.6-27b", "base64");
-  } catch (err) {
-    console.error("Qwen vision extraction failed:", err.message);
-    return null;
+  const attemptsCount = GEMINI_KEYS.length > 0 ? GEMINI_KEYS.length : 1;
+  let lastError = null;
+
+  for (let attempt = 0; attempt < attemptsCount; attempt++) {
+    const apiKey = getNextGeminiApiKey() || process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      console.error("❌ Gemini Vision failed: No Gemini API Key configured.");
+      return null;
+    }
+
+    try {
+      const ai = new GoogleGenAI({ apiKey });
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3.1-flash-lite",
+        contents: [
+          {
+            inlineData: {
+              data: base64Image,
+              mimeType: "image/jpeg"
+            }
+          },
+          prompt
+        ],
+        config: {
+          responseMimeType: "application/json"
+        }
+      });
+
+      return parseMaybeJson(response.text);
+    } catch (err) {
+      lastError = err;
+      console.warn(`⚠️ Gemini API attempt ${attempt + 1}/${attemptsCount} failed using key ending in ...${apiKey ? apiKey.slice(-6) : "None"}: ${err.message}`);
+      if (attempt < attemptsCount - 1) {
+        // Wait briefly before retrying next key
+        await new Promise(r => setTimeout(r, 300));
+      }
+    }
   }
+
+  console.error("❌ All Gemini API keys failed vision extraction. Last error:", lastError?.message);
+  return null;
 }
 
 // Text-only reasoning — groq-sdk is fine here (no large payloads)
