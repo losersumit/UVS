@@ -21,6 +21,25 @@ const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 const GROQ_ENDPOINT = "https://api.groq.com/openai/v1/chat/completions";
 const VISION_TIMEOUT_MS = 30_000; // 30s — consistent with the worker bot
 
+// ─── GROQ KEYS ROTATION ───
+const GROQ_KEYS = [
+  process.env.GROQ_API_KEY,
+  process.env.GROQ_API_KEY_ONE,
+  process.env.GROQ_API_KEY_TWO,
+  process.env.GROQ_API_KEY_THREE,
+  process.env.GROQ_API_KEY_FOUR,
+  process.env.GROQ_API_KEY_FIVE,
+  process.env.GROQ_API_KEY_SIX,
+].filter(Boolean);
+
+let keyIndex = 0;
+function getNextApiKey() {
+  if (GROQ_KEYS.length === 0) return null;
+  const key = GROQ_KEYS[keyIndex % GROQ_KEYS.length];
+  keyIndex++;
+  return key;
+}
+
 function parseMaybeJson(content) {
   // Strip reasoning block if present
   let cleaned = content.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
@@ -79,10 +98,12 @@ async function runVision(prompt, imageSource, model, imageMode = "base64") {
     payload.response_format = { type: "json_object" };
   }
 
+  const apiKey = getNextApiKey() || process.env.GROQ_API_KEY;
+
   const res = await axios.post(GROQ_ENDPOINT, payload, {
     headers: {
       "Content-Type": "application/json",
-      "Authorization": `Bearer ${process.env.GROQ_API_KEY}`
+      "Authorization": `Bearer ${apiKey}`
     },
     timeout: VISION_TIMEOUT_MS
   });
@@ -97,19 +118,11 @@ async function runVision(prompt, imageSource, model, imageMode = "base64") {
  * @param {string}  [imageUrl]   — original Discord CDN URL, used by Scout (URL mode)
  */
 async function extractWithFallback(prompt, base64Image, imageUrl) {
-  // 1️⃣ Primary — Scout via URL (fast, stable; 20MB URL limit, no base64 cap issue)
-  try {
-    if (!imageUrl) throw new Error("No image URL available for Scout.");
-    return await runVision(prompt, imageUrl, "meta-llama/llama-4-scout-17b-16e-instruct", "url");
-  } catch (err) {
-    console.warn("Scout failed, trying Qwen...", err.message);
-  }
-
-  // 2️⃣ Fallback — Qwen via base64
+  // Use Qwen 3.6 27B as primary/only model because Llama has been decommissioned
   try {
     return await runVision(prompt, base64Image, "qwen/qwen3.6-27b", "base64");
   } catch (err) {
-    console.error("Vision fallback failed:", err.message);
+    console.error("Qwen vision extraction failed:", err.message);
     return null;
   }
 }
@@ -117,12 +130,15 @@ async function extractWithFallback(prompt, base64Image, imageUrl) {
 // Text-only reasoning — groq-sdk is fine here (no large payloads)
 async function analyzeRunsWithReasoning(prompt) {
   try {
-    if (!process.env.GROQ_API_KEY) {
+    const apiKey = getNextApiKey() || process.env.GROQ_API_KEY;
+    if (!apiKey) {
       console.error("❌ Reasoning analysis failed: Missing GROQ_API_KEY in .env");
       return null;
     }
 
-    const res = await groq.chat.completions.create({
+    const currentGroq = new Groq({ apiKey });
+
+    const res = await currentGroq.chat.completions.create({
       model: "openai/gpt-oss-120b",
       temperature: 0.2,
       max_completion_tokens: 4096,

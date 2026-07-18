@@ -2,10 +2,29 @@
 // Text-only plausibility reasoning fallback
 
 const Groq = require("groq-sdk");
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+// ─── GROQ KEYS ROTATION ───
+const GROQ_KEYS = [
+  process.env.GROQ_API_KEY,
+  process.env.GROQ_API_KEY_ONE,
+  process.env.GROQ_API_KEY_TWO,
+  process.env.GROQ_API_KEY_THREE,
+  process.env.GROQ_API_KEY_FOUR,
+  process.env.GROQ_API_KEY_FIVE,
+  process.env.GROQ_API_KEY_SIX,
+].filter(Boolean);
+
+let keyIndex = 0;
+function getNextApiKey() {
+  if (GROQ_KEYS.length === 0) return null;
+  const key = GROQ_KEYS[keyIndex % GROQ_KEYS.length];
+  keyIndex++;
+  return key;
+}
 
 async function reasoningValidate(payload, model) {
-  const res = await groq.chat.completions.create({
+  const apiKey = getNextApiKey() || process.env.GROQ_API_KEY;
+  const currentGroq = new Groq({ apiKey });
+  const res = await currentGroq.chat.completions.create({
     model,
     temperature: 0,
     max_tokens: 256,
