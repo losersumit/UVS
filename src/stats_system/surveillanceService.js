@@ -51,7 +51,7 @@ async function handleMemberJoin(member) {
         .insert({
           discord_id: discordId,
           username: username,
-          current_guild: { tag: guildTag, joined_at: joinedAt },
+          current_guild: [{ tag: guildTag, joined_at: joinedAt }],
           previous_guilds: []
         });
 
@@ -60,37 +60,31 @@ async function handleMemberJoin(member) {
       }
     } else {
       // Member exists
-      const current = existing.current_guild;
+      let current = existing.current_guild || [];
+      if (!Array.isArray(current)) {
+        current = current ? [current] : [];
+      }
       let previous = existing.previous_guilds || [];
       if (!Array.isArray(previous)) previous = [];
 
-      let updatedCurrent = current;
-      let updatedPrevious = [...previous];
+      // Check if guild already in current
+      const alreadyInCurrent = current.some(g => g.tag === guildTag);
 
-      if (!current) {
-        updatedCurrent = { tag: guildTag, joined_at: joinedAt };
-      } else if (current.tag !== guildTag) {
-        // Move current guild to previous_guilds
-        const archivedGuild = {
-          tag: current.tag,
-          joined_at: current.joined_at,
-          left_at: new Date().toISOString()
-        };
-        updatedPrevious.push(archivedGuild);
-        updatedCurrent = { tag: guildTag, joined_at: joinedAt };
-      }
+      if (!alreadyInCurrent) {
+        current.push({ tag: guildTag, joined_at: joinedAt });
 
-      const { error: updateError } = await supabase
-        .from("member_surveillance")
-        .update({
-          username: username,
-          current_guild: updatedCurrent,
-          previous_guilds: updatedPrevious
-        })
-        .eq("discord_id", discordId);
+        const { error: updateError } = await supabase
+          .from("member_surveillance")
+          .update({
+            username: username,
+            current_guild: current,
+            previous_guilds: previous
+          })
+          .eq("discord_id", discordId);
 
-      if (updateError) {
-        console.error(`❌ [Surveillance] Error updating member ${discordId}:`, updateError);
+        if (updateError) {
+          console.error(`❌ [Surveillance] Error updating member ${discordId}:`, updateError);
+        }
       }
     }
   } catch (err) {
@@ -125,15 +119,22 @@ async function handleMemberLeave(member) {
     }
 
     if (existing) {
-      const current = existing.current_guild;
+      let current = existing.current_guild || [];
+      if (!Array.isArray(current)) {
+        current = current ? [current] : [];
+      }
       let previous = existing.previous_guilds || [];
       if (!Array.isArray(previous)) previous = [];
 
-      if (current && current.tag === guildTag) {
-        // Move current to previous
+      const guildIndex = current.findIndex(g => g.tag === guildTag);
+      if (guildIndex !== -1) {
+        // Remove from current_guild
+        const [removedGuild] = current.splice(guildIndex, 1);
+        
+        // Add left_at and archive in previous_guilds
         const archivedGuild = {
-          tag: current.tag,
-          joined_at: current.joined_at,
+          tag: removedGuild.tag,
+          joined_at: removedGuild.joined_at,
           left_at: new Date().toISOString()
         };
         const updatedPrevious = [...previous, archivedGuild];
@@ -142,7 +143,7 @@ async function handleMemberLeave(member) {
           .from("member_surveillance")
           .update({
             username: username,
-            current_guild: null,
+            current_guild: current,
             previous_guilds: updatedPrevious
           })
           .eq("discord_id", discordId);
@@ -189,7 +190,7 @@ async function syncAllMembers(client) {
 
     // 3. Scan all members in all approved guilds
     // Group active memberships by user ID
-    const userActiveGuilds = new Map(); // discord_id -> Array of { guildTag, joinedAt, username }
+    const userActiveGuilds = new Map(); // discord_id -> Array of { tag, joined_at, username }
 
     for (const [guildId, guildTag] of guildTagMap) {
       const guild = await client.guilds.fetch(guildId).catch(() => null);
@@ -227,31 +228,20 @@ async function syncAllMembers(client) {
     let updates = 0;
 
     for (const [discordId, activeGuildList] of userActiveGuilds) {
-      // Sort active guilds by join date ascending
-      activeGuildList.sort((a, b) => new Date(a.joined_at) - new Date(b.joined_at));
-
-      // The latest join date guild is the current guild
-      const primaryGuild = activeGuildList[activeGuildList.length - 1];
-      const otherGuilds = activeGuildList.slice(0, -1);
-
       const existing = surveillanceMap.get(discordId);
+      const primaryUsername = activeGuildList[0].username;
 
       if (!existing) {
-        // Create new record
-        // Any secondary guilds the user is in are immediately added as previous/historical
-        const previousList = otherGuilds.map(g => ({
-          tag: g.tag,
-          joined_at: g.joined_at,
-          left_at: new Date().toISOString() // Marked as left current tracking
-        }));
+        // Create new record with all their current active guilds
+        const currentList = activeGuildList.map(g => ({ tag: g.tag, joined_at: g.joined_at }));
 
         const { error: insErr } = await supabase
           .from("member_surveillance")
           .insert({
             discord_id: discordId,
-            username: primaryGuild.username,
-            current_guild: { tag: primaryGuild.tag, joined_at: primaryGuild.joined_at },
-            previous_guilds: previousList
+            username: primaryUsername,
+            current_guild: currentList,
+            previous_guilds: []
           });
 
         if (insErr) {
@@ -261,75 +251,53 @@ async function syncAllMembers(client) {
         }
       } else {
         // Update existing record
-        const current = existing.current_guild;
+        let current = existing.current_guild || [];
+        if (!Array.isArray(current)) {
+          current = current ? [current] : [];
+        }
         let previous = existing.previous_guilds || [];
         if (!Array.isArray(previous)) previous = [];
 
-        let updatedCurrent = current;
+        let updatedCurrent = [...current];
         let updatedPrevious = [...previous];
 
-        if (!current) {
-          // If no current guild stored, set it to the primary active guild
-          updatedCurrent = { tag: primaryGuild.tag, joined_at: primaryGuild.joined_at };
-          // Add any secondary guilds to previous if they are not already logged
-          for (const sg of otherGuilds) {
-            if (!updatedPrevious.some(p => p.tag === sg.tag && p.joined_at === sg.joined_at)) {
-              updatedPrevious.push({
-                tag: sg.tag,
-                joined_at: sg.joined_at,
-                left_at: new Date().toISOString()
-              });
-            }
+        // 4a. Add new active guilds to current list if they aren't already there
+        for (const activeGuild of activeGuildList) {
+          const alreadyInCurrent = updatedCurrent.some(cg => cg.tag === activeGuild.tag);
+          if (!alreadyInCurrent) {
+            updatedCurrent.push({ tag: activeGuild.tag, joined_at: activeGuild.joined_at });
           }
-        } else if (current.tag !== primaryGuild.tag) {
-          // If the primary active guild is different from the tracked current guild:
-          // 1. Move old current guild to previous_guilds
-          if (!updatedPrevious.some(p => p.tag === current.tag && p.joined_at === current.joined_at)) {
+        }
+
+        // 4b. If user is no longer in a guild that we have in current_guild:
+        // Move it from current_guild to previous_guilds
+        const finalCurrent = [];
+        for (const cg of updatedCurrent) {
+          const stillInGuild = activeGuildList.some(ag => ag.tag === cg.tag);
+          if (stillInGuild) {
+            finalCurrent.push(cg);
+          } else {
+            // Member left this guild (e.g. while bot was offline)
             updatedPrevious.push({
-              tag: current.tag,
-              joined_at: current.joined_at,
+              tag: cg.tag,
+              joined_at: cg.joined_at,
               left_at: new Date().toISOString()
             });
-          }
-          // 2. Set new current guild
-          updatedCurrent = { tag: primaryGuild.tag, joined_at: primaryGuild.joined_at };
-
-          // 3. Add any other secondary guilds to previous
-          for (const sg of otherGuilds) {
-            if (sg.tag !== current.tag && !updatedPrevious.some(p => p.tag === sg.tag && p.joined_at === sg.joined_at)) {
-              updatedPrevious.push({
-                tag: sg.tag,
-                joined_at: sg.joined_at,
-                left_at: new Date().toISOString()
-              });
-            }
-          }
-        } else {
-          // If current guild tag matches the primary active guild tag,
-          // check if we need to add any other secondary active guilds to previous
-          for (const sg of otherGuilds) {
-            if (!updatedPrevious.some(p => p.tag === sg.tag && p.joined_at === sg.joined_at)) {
-              updatedPrevious.push({
-                tag: sg.tag,
-                joined_at: sg.joined_at,
-                left_at: new Date().toISOString()
-              });
-            }
           }
         }
 
         // Only update if changes occurred or username updated
         const needsUpdate = 
-          existing.username !== primaryGuild.username ||
-          JSON.stringify(existing.current_guild) !== JSON.stringify(updatedCurrent) ||
+          existing.username !== primaryUsername ||
+          JSON.stringify(existing.current_guild) !== JSON.stringify(finalCurrent) ||
           JSON.stringify(existing.previous_guilds) !== JSON.stringify(updatedPrevious);
 
         if (needsUpdate) {
           const { error: updErr } = await supabase
             .from("member_surveillance")
             .update({
-              username: primaryGuild.username,
-              current_guild: updatedCurrent,
+              username: primaryUsername,
+              current_guild: finalCurrent,
               previous_guilds: updatedPrevious
             })
             .eq("discord_id", discordId);
@@ -344,28 +312,32 @@ async function syncAllMembers(client) {
     }
 
     // 5. Handle members who left all approved guilds
-    // If a user has a current_guild in the DB, but they were not found in userActiveGuilds:
-    // Move their current_guild to previous_guilds and set current_guild to null.
+    // If a user has items in current_guild in DB, but was not found in userActiveGuilds:
+    // Move all current_guild records to previous_guilds and clear current_guild
     let leftCount = 0;
     for (const record of existingRecords || []) {
-      if (record.current_guild && !userActiveGuilds.has(record.discord_id)) {
-        const current = record.current_guild;
+      let current = record.current_guild || [];
+      if (!Array.isArray(current)) {
+        current = current ? [current] : [];
+      }
+
+      if (current.length > 0 && !userActiveGuilds.has(record.discord_id)) {
         let previous = record.previous_guilds || [];
         if (!Array.isArray(previous)) previous = [];
 
-        const updatedPrevious = [
-          ...previous,
-          {
-            tag: current.tag,
-            joined_at: current.joined_at,
+        const updatedPrevious = [...previous];
+        for (const cg of current) {
+          updatedPrevious.push({
+            tag: cg.tag,
+            joined_at: cg.joined_at,
             left_at: new Date().toISOString()
-          }
-        ];
+          });
+        }
 
         const { error: leaveErr } = await supabase
           .from("member_surveillance")
           .update({
-            current_guild: null,
+            current_guild: [],
             previous_guilds: updatedPrevious
           })
           .eq("discord_id", record.discord_id);
