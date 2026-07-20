@@ -43,6 +43,7 @@ const radioCmd = require("./src/commands/radio");
 const radiochannelCmd = require("./src/commands/radiochannel");
 const { handleRadioMessage } = require("./src/radioManager");
 const { updateRadioDirectory } = require("./src/stats_system/radioDirectory");
+const { handleMemberJoin, handleMemberLeave, syncAllMembers } = require("./src/stats_system/surveillanceService");
 
 // ─── Command Router ───
 const commandHandlers = {
@@ -68,7 +69,8 @@ const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent
+    GatewayIntentBits.MessageContent,
+    GatewayIntentBits.GuildMembers
   ]
 });
 
@@ -103,6 +105,11 @@ client.once("clientReady", async () => {
   // Initialize/Update Central Radio Directory on Restart
   updateRadioDirectory(client).catch(err =>
     console.error("Central radio directory update on restart failed:", err)
+  );
+
+  // Run surveillance member sync on Restart
+  syncAllMembers(client).catch(err =>
+    console.error("Surveillance member sync on restart failed:", err)
   );
 
   // ─── SUSPENDED GUILD SWEEP ───
@@ -252,6 +259,23 @@ client.on("messageCreate", async (message) => {
     await handleRadioMessage(message);
   } catch (err) {
     console.error("[RadioMessage] Error:", err);
+  }
+});
+
+// ─── MEMBER SURVEILLANCE LISTENERS ───
+client.on("guildMemberAdd", async (member) => {
+  try {
+    await handleMemberJoin(member);
+  } catch (err) {
+    console.error("[Surveillance] Error in guildMemberAdd:", err);
+  }
+});
+
+client.on("guildMemberRemove", async (member) => {
+  try {
+    await handleMemberLeave(member);
+  } catch (err) {
+    console.error("[Surveillance] Error in guildMemberRemove:", err);
   }
 });
 

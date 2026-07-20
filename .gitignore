@@ -28,6 +28,9 @@ build/
 *.exe
 *.dll
 
+context_for_agent
+context_for_agent/
+data/
 scripts/
 scripts/leave_server.js
 scripts/list_servers.js
