@@ -8,6 +8,26 @@ const { AttachmentBuilder, EmbedBuilder } = require("discord.js");
 
 const MIRROR_CHANNEL_ID = process.env.JOB_LOG_MIRROR_CHANNEL_ID;
 
+function formatISTDate(timestamp) {
+  const date = new Date(timestamp);
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Kolkata",
+    month: "long",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false
+  });
+  
+  const parts = formatter.formatToParts(date);
+  const month = parts.find(p => p.type === 'month').value;
+  const day = parts.find(p => p.type === 'day').value;
+  const hour = parts.find(p => p.type === 'hour').value;
+  const minute = parts.find(p => p.type === 'minute').value;
+  
+  return `${month} ${day} ${hour}:${minute}`;
+}
+
 /**
  * @param {import('discord.js').Client} client
  * @param {import('discord.js').Message} message
@@ -15,43 +35,31 @@ const MIRROR_CHANNEL_ID = process.env.JOB_LOG_MIRROR_CHANNEL_ID;
  * @param {string} guildName    - human-readable VTC name
  */
 async function mirrorJobLog(client, message, guildConfig, guildName) {
-  if (!MIRROR_CHANNEL_ID) return;
+  if (!MIRROR_CHANNEL_ID) return null;
 
   try {
     const mirrorChannel = await client.channels
       .fetch(MIRROR_CHANNEL_ID)
       .catch(() => null);
-    if (!mirrorChannel) return;
+    if (!mirrorChannel) return null;
 
     const displayName =
       message.member?.displayName || message.author.username;
-    const vtcName  = guildName || guildConfig.guild_tag || message.guild.name;
+    const vtcTag = guildConfig.guild_tag || `[${guildName || message.guild.name}]`;
     const color    = guildConfig.embed_color || 0xff7801;
-    const vtcLogo  = guildConfig.avatar_url  || null;
 
-    // ── Build embed ────────────────────────────────────────────
-    const embed = new EmbedBuilder()
-      .setColor(color)
-      .setAuthor({
-        name:    vtcName,
-        iconURL: vtcLogo || undefined,
-      })
-      .addFields(
-        { name: "👤 Driver",   value: displayName, inline: true },
-        { name: "🏢 VTC",     value: vtcName,     inline: true },
-        {
-          name:   "🕐 Posted",
-          value:  `<t:${Math.floor(message.createdTimestamp / 1000)}:F>`,
-          inline: true,
-        }
-      )
-      .setFooter({ text: `${message.guild.name} • Job Log Mirror` })
-      .setTimestamp();
+    // ── Build compact description ──────────────────────────────
+    const formattedDate = formatISTDate(message.createdTimestamp);
+    let description = `👤: ${displayName}\n🏢: ${vtcTag}\n🗓️: ${formattedDate}`;
 
     // Add text content if any
     if (message.content?.trim()) {
-      embed.setDescription(message.content.trim());
+      description += `\n\n${message.content.trim()}`;
     }
+
+    const embed = new EmbedBuilder()
+      .setColor(color)
+      .setDescription(description);
 
     // ── Download attachments ───────────────────────────────────
     const files = [];
@@ -81,7 +89,6 @@ async function mirrorJobLog(client, message, guildConfig, guildName) {
     }
 
     // ── Forward any existing embeds as fields ──────────────────
-    // (e.g. if another bot posted an embed in that channel)
     for (const srcEmbed of message.embeds) {
       if (srcEmbed.description) {
         embed.setDescription(
@@ -91,12 +98,14 @@ async function mirrorJobLog(client, message, guildConfig, guildName) {
       }
     }
 
-    await mirrorChannel.send({ embeds: [embed], files });
+    const mirroredMessage = await mirrorChannel.send({ embeds: [embed], files });
     console.log(
-      `[MIRROR] ✅ Mirrored job log from ${vtcName} by ${displayName}`
+      `[MIRROR] ✅ Mirrored job log from ${vtcTag} by ${displayName}`
     );
+    return mirroredMessage;
   } catch (err) {
     console.error("[MIRROR] Error:", err.message);
+    return null;
   }
 }
 

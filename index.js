@@ -41,6 +41,7 @@ const changeguildCmd = require("./src/commands/changeguild");
 const helpCmd = require("./src/commands/help");
 const radioCmd = require("./src/commands/radio");
 const radiochannelCmd = require("./src/commands/radiochannel");
+const codesCmd = require("./src/commands/codes");
 const { handleRadioMessage } = require("./src/radioManager");
 const { updateRadioDirectory } = require("./src/stats_system/radioDirectory");
 const { handleMemberJoin, handleMemberLeave, syncAllMembers } = require("./src/stats_system/surveillanceService");
@@ -63,6 +64,7 @@ const commandHandlers = {
   help: helpCmd.execute,
   setradiofrequency: radioCmd.execute,
   setradiochannel: radiochannelCmd.execute,
+  codes: codesCmd.execute,
 };
 
 const client = new Client({
@@ -211,6 +213,10 @@ client.once("clientReady", async () => {
           channel_types: [0, 5, 10, 11, 12] // GuildText, GuildAnnouncement, threads
         }
       ]
+    },
+    {
+      name: "codes",
+      description: "View the job log error codes (Owner Only)"
     }
   ];
 
