@@ -43,9 +43,9 @@ async function getGuildConfig(guildId) {
     call_channel_id: guild.call_channel_id || null,
 
     // Emojis (Hardcoded since DB columns were deleted)
-    star_1_emoji: "<:stara:1464126270349508681>",
-    star_2_emoji: "<:starb:1464126542438207538>",
-    star_3_emoji: "<:starc:1464126268453818555>",
+    star_1_emoji: "<a:stara:1530926858646847488>",
+    star_2_emoji: "<a:starb:1530926845413818439>",
+    star_3_emoji: "<a:starc:1530926869191462952>",
 
     // Features
     enable_clear_stats: guild.enable_clear_stats !== false // default true
@@ -69,9 +69,9 @@ function getDefaultConfig() {
     screenshot_channel_id: null,
     leaderboard_channel_id: null,
     call_channel_id: null,
-    star_1_emoji: "<:stara:1464126270349508681>",
-    star_2_emoji: "<:starb:1464126542438207538>",
-    star_3_emoji: "<:starc:1464126268453818555>",
+    star_1_emoji: "<a:stara:1530926858646847488>",
+    star_2_emoji: "<a:starb:1530926845413818439>",
+    star_3_emoji: "<a:starc:1530926869191462952>", 
     enable_clear_stats: true
   };
 }
