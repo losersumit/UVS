@@ -108,10 +108,14 @@ function registerScreenshotListener(client) {
       }
 
       // ══ SUSPENSION CHECK ══
-      const suspended = await isUserSuspended(message.author.id);
-      if (suspended) {
+      const suspension = await isUserSuspended(message.author.id);
+      if (suspension) {
+        const reason = suspension.reason || "No reason specified";
         await message.reactions.cache.get("⏳")?.remove().catch(() => {});
         await reactWithErrorCode(message, "106");
+
+        // Send standard message in channel
+        await message.channel.send(`You are suspended due to: **${reason}**\n-# *This message was meant for <@${message.author.id}>.*`).catch(() => {});
 
         if (mirroredMessage) {
           try {
@@ -313,6 +317,14 @@ function registerScreenshotListener(client) {
         await message.reactions.cache.get("⏳")?.remove().catch(() => {});
         const code = getErrorCodeForError(err);
         await reactWithErrorCode(message, code);
+
+        if (code === "102") {
+          const text = err.message.replace("🚫 ", "");
+          await message.channel.send(`${text}\n-# *This message was meant for <@${message.author.id}>.*`).catch(() => {});
+        } else if (code === "103") {
+          const text = err.message.replace("❌ ", "");
+          await message.channel.send(`${text}\n-# *This message was meant for <@${message.author.id}>.*`).catch(() => {});
+        }
 
         if (mirroredMessage) {
           try {

@@ -21,10 +21,10 @@ function toIST(date) {
 async function isUserSuspended(discordId) {
   const { data } = await supabase
     .from("suspended_users")
-    .select("id")
+    .select("id, reason")
     .eq("discord_id", discordId)
     .maybeSingle();
-  return !!data;
+  return data;
 }
 
 /**
