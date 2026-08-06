@@ -32,8 +32,8 @@ const { isGuildApproved } = require("./src/guildGuard");
 
 // ─── Command Modules ───
 const statsCmd = require("./src/commands/stats");
-const { speedlb, levellb, distancelb, timelb, networthlb } = require("./src/commands/leaderboards");
-const { worstdrivers, bestdrivers } = require("./src/commands/drivers");
+const { speedlb, levellb, distancelb, timelb, networthlb, renderLeaderboardPage } = require("./src/commands/leaderboards");
+const { worstdrivers, bestdrivers, renderDriversPage } = require("./src/commands/drivers");
 const { suspendvtc, restorevtc } = require("./src/commands/vtc");
 const adminCmd = require("./src/commands/admin");
 const suspenduserCmd = require("./src/commands/suspenduser");
@@ -173,8 +173,26 @@ client.once("clientReady", async () => {
     }
   })();
 
-  // Register Commands
-  const commands = [
+  // 1. Clear any existing global commands to prevent duplicates
+  await client.application.commands.set([]);
+  console.log("🧹 Global application commands cleared.");
+
+  // 2. Fetch all approved guilds from the database
+  const { data: approvedGuilds, error: fetchGuildsErr } = await supabase
+    .from("approved_guilds")
+    .select("guild_id")
+    .eq("is_suspended", false);
+
+  if (fetchGuildsErr) {
+    console.error("❌ Failed to fetch approved guilds for command registration:", fetchGuildsErr.message);
+    return;
+  }
+
+  const activeGuildIds = approvedGuilds ? approvedGuilds.map(g => g.guild_id) : [];
+  const hqGuildId = process.env.HQ_GUILD_ID;
+
+  // Define commands for standard VTC servers (has 'global' option)
+  const standardCommands = [
     { name: "stats", description: "Check trucking stats", options: [{ name: "user", description: "View stats of another player", type: 6, required: false }] },
     { name: "speedlb", description: "View top average speeds", options: [{ name: "global", description: "Show all approved VTC members", type: 5, required: false }] },
     { name: "levellb", description: "View highest level truckers", options: [{ name: "global", description: "Show all approved VTC members", type: 5, required: false }] },
@@ -196,7 +214,7 @@ client.once("clientReady", async () => {
         {
           name: "frequency",
           description: "Frequency between 100.00 and 120.00 MHz (e.g., 119.88)",
-          type: 10, // NUMBER type
+          type: 10,
           required: true
         }
       ]
@@ -208,9 +226,9 @@ client.once("clientReady", async () => {
         {
           name: "channel",
           description: "The text channel UVS has access to",
-          type: 7, // CHANNEL type
+          type: 7,
           required: true,
-          channel_types: [0, 5, 10, 11, 12] // GuildText, GuildAnnouncement, threads
+          channel_types: [0, 5, 10, 11, 12]
         }
       ]
     },
@@ -220,8 +238,40 @@ client.once("clientReady", async () => {
     }
   ];
 
-  await client.application.commands.set(commands);
-  console.log("✅ Application commands registered.");
+  // Define commands for Headquarters/Main VTC Server (NO 'global' option)
+  const hqCommands = [
+    { name: "stats", description: "Check trucking stats", options: [{ name: "user", description: "View stats of another player", type: 6, required: false }] },
+    { name: "speedlb",    description: "View top average speeds (Global)" },
+    { name: "levellb",    description: "View highest level truckers (Global)" },
+    { name: "distancelb", description: "View top drivers by total distance (Global)" },
+    { name: "timelb",     description: "View top drivers by total time (Global)" },
+    { name: "networthlb", description: "View top drivers by their Net Worth (Global)" },
+    { name: "worstdrivers", description: "View worst drivers by penalties (Global)" },
+    { name: "bestdrivers", description: "View best drivers by clean deliveries (Global)" },
+    { name: "clearstats",  description: "Reset a user's stats (Owner Only)", options: [{ name: "user", description: "User to clear", type: 6, required: true }] },
+    { name: "suspenduser", description: "Suspend a user from logging jobs (Owner Only)", options: [{ name: "user", description: "User to suspend", type: 6, required: true }, { name: "reason", description: "Reason for suspension", type: 3, required: true }] },
+    { name: "help", description: "Show bot instructions and commands" },
+    { name: "codes", description: "View the job log error codes" }
+  ];
+
+  // Register commands per-guild
+  for (const guildId of activeGuildIds) {
+    try {
+      const guild = await client.guilds.fetch(guildId).catch(() => null);
+      if (!guild) {
+        console.warn(`[CommandReg] Could not fetch guild: ${guildId}`);
+        continue;
+      }
+
+      const isHQ = guildId === hqGuildId;
+      const targetCommands = isHQ ? hqCommands : standardCommands;
+
+      await guild.commands.set(targetCommands);
+      console.log(`✅ Registered commands for guild: ${guild.name} (${guildId}) [HQ: ${isHQ}]`);
+    } catch (err) {
+      console.error(`❌ Failed to register commands for guild ${guildId}:`, err.message);
+    }
+  }
 });
 
 client.on("guildCreate", async (guild) => {
@@ -254,6 +304,38 @@ client.on("interactionCreate", async (interaction) => {
           await interaction.reply(reply).catch(() => {});
         }
       }
+    }
+    return;
+  }
+
+  // ─── Button Interactions: Leaderboard Pagination ───
+  if (interaction.isButton()) {
+    const { customId, guild } = interaction;
+    if (!customId.startsWith("lb_page:")) return;
+
+    const [, commandName, isGlobalStr, pageStr] = customId.split(":");
+    const isGlobal = isGlobalStr === "true";
+    const page     = parseInt(pageStr, 10);
+    const guildId  = guild?.id;
+    const guildName = guild?.name || "Unknown";
+
+    try {
+      await interaction.deferUpdate();
+
+      // Route to the correct renderer
+      const LB_COMMANDS = ["speedlb", "levellb", "distancelb", "timelb", "networthlb"];
+      const DR_COMMANDS = ["bestdrivers", "worstdrivers"];
+
+      let response = null;
+      if (LB_COMMANDS.includes(commandName)) {
+        response = await renderLeaderboardPage(commandName, guildId, isGlobal, page, guildName);
+      } else if (DR_COMMANDS.includes(commandName)) {
+        response = await renderDriversPage(commandName, guildId, isGlobal, page, guildName);
+      }
+
+      if (response) await interaction.editReply(response);
+    } catch (err) {
+      console.error(`[Pagination] Button handler error for ${customId}:`, err);
     }
     return;
   }

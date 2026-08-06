@@ -11,6 +11,9 @@ const { supabase } = require("../stats_system/supabase");
 const { updateRadioDirectory } = require("../stats_system/radioDirectory");
 
 async function setradiofrequency(interaction) {
+  // Radio module is disabled in the HQ server
+  if (interaction.guild.id === process.env.HQ_GUILD_ID) return;
+
   const guildId = interaction.guild.id;
   const frequency = interaction.options.getNumber("frequency");
 

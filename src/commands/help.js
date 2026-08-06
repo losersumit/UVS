@@ -1,9 +1,9 @@
-const { supabase } = require("../stats_system/supabase");
 const { getGuildConfig } = require("../stats_system/guildConfig");
 
 async function execute(interaction) {
   await interaction.deferReply();
   const guildConfig = await getGuildConfig(interaction.guild.id);
+  const isHQ = interaction.guild.id === process.env.HQ_GUILD_ID;
 
   const screenshotChannel = guildConfig.screenshot_channel_id
     ? `<#${guildConfig.screenshot_channel_id}>`
@@ -13,36 +13,39 @@ async function execute(interaction) {
     ? `<#${guildConfig.leaderboard_channel_id}>`
     : "the server leaderboards";
 
-  const { data: guildsData } = await supabase
-    .from("approved_guilds")
-    .select("guild_id, guild_tag, guild_name")
-    .eq("is_suspended", false)
-    .order("guild_tag", { ascending: true });
+  // ── Command description varies slightly between HQ and VTC servers ──
+  const lbOptionNote = isHQ
+    ? "All leaderboard commands are **global** in this server — no option needed."
+    : "Default is current server only. Set `global: True` for all servers.";
 
-  const guildList = (guildsData || []).map(g => {
-    const name = g.guild_name || interaction.client.guilds.cache.get(g.guild_id)?.name || "Unknown Server";
-    return `**${g.guild_tag}** ${name}`;
-  }).join("\n");
+  const radioFields = isHQ
+    ? [
+        { name: "📡 Radio Module", value: "🚫 The radio broadcast module is **disabled** in this server.", inline: false }
+      ]
+    : [
+        { name: "📡 /setradiofrequency [freq]", value: "Tune into a radio frequency between 100.00 and 120.00 MHz (e.g., `119.88`).", inline: true },
+        { name: "📻 Radio Broadcast (+rd)", value: "Prefix any message with `+rd ` to broadcast it to all VTCs sharing your frequency. Their designated call channel will receive it. (**100.00 MHz** is the Help & Support frequency monitored by NMC).", inline: false }
+      ];
 
   const helpEmbed = {
     title: "🚛 UVS Bot Help & Commands",
-    description: `I am a career tracking bot for **Truckers of Europe 3**! \n\n**How it works:**\n1. Upload your **'Job Finished'** screenshot to ${screenshotChannel}.\n2. I will automatically scan the image (OCR), verify the data, and update your career stats.\n3. Compete with others on ${leaderboardChannel}!`,
+    description: isHQ
+      ? `I am a career tracking bot for **Truckers of Europe 3**!\n\n**How it works:**\n1. Upload your **'Job Finished'** screenshot to ${screenshotChannel}.\n2. I will automatically scan the image (OCR), verify the data, and update your career stats.\n3. Compete with other drivers on ${leaderboardChannel}!\n\nThis is the **Main VTC Server** — all drivers from any VTC (or Independent) can log their jobs here.`
+      : `I am a career tracking bot for **Truckers of Europe 3**!\n\n**How it works:**\n1. Upload your **'Job Finished'** screenshot to ${screenshotChannel}.\n2. I will automatically scan the image (OCR), verify the data, and update your career stats.\n3. Compete with others on ${leaderboardChannel}!`,
     color: guildConfig.embed_color,
     thumbnail: guildConfig.thumbnail ? { url: guildConfig.thumbnail } : undefined,
     fields: [
       { name: "📊 /stats [user]", value: "View your personal career stats or check another driver's profile.", inline: false },
-      { name: "🏁 /speedlb [global]", value: "View Top Average Speeds. Default is current server only. Set `global: True` for all servers.", inline: true },
-      { name: "📈 /levellb [global]", value: "See highest Career Levels. Default is current server only. Set `global: True` to include all servers.", inline: true },
-      { name: "🛤️ /distancelb [global]", value: "Rank by Total Distance. Default is current server only. Set `global: True` to include all servers.", inline: true },
-      { name: "⏱️ /timelb [global]", value: "Rank by Total Time Driven. Default is current server only. Set `global: True` to include all servers.", inline: true },
-      { name: "💰 /networthlb [global]", value: "Rank by total money earned from saved runs. Default is current server only. Set `global: True` to include all servers.", inline: true },
-      { name: "⭐ /bestdrivers [global]", value: "Rank by Clean Deliveries. Default is current server only. Set `global: True` to include all servers.", inline: true },
-      { name: "🚨 /worstdrivers [global]", value: "Rank by total penalties. Default is current server only. Set `global: True` to include all servers.", inline: true },
-      { name: "🛠️ /clearstats", value: "**(Owner Only)** Reset a user's stats completely.", inline: true },
-      { name: "🚫 /suspenduser", value: "**(Owner Only)** Completely delete a user's account and remove all their run logs/contributions.", inline: true },
-      { name: "📡 /setradiofrequency [freq]", value: "Tune into a radio frequency between 100.00 and 120.00 MHz (e.g., `119.88`).", inline: true },
-      { name: "📻 Radio Broadcast (+rd)", value: "Prefix any message in any channel with `+rd ` to broadcast it to all other VTCs sharing your frequency. The message will be received in their designated call channel. (Note: **100.00 MHz** is the Help & Support frequency monitored by NMC).", inline: false },
-      { name: "✅ Approved VTCs", value: guildList || "No VTCs found.", inline: false },
+      { name: "🏁 /speedlb",    value: `View Top Average Speeds. ${lbOptionNote}`, inline: true },
+      { name: "📈 /levellb",    value: `See highest Career Levels. ${lbOptionNote}`, inline: true },
+      { name: "🛤️ /distancelb", value: `Rank by Total Distance. ${lbOptionNote}`, inline: true },
+      { name: "⏱️ /timelb",    value: `Rank by Total Time Driven. ${lbOptionNote}`, inline: true },
+      { name: "💰 /networthlb", value: `Rank by total money earned. ${lbOptionNote}`, inline: true },
+      { name: "⭐ /bestdrivers",  value: `Rank by Clean Deliveries. ${lbOptionNote}`, inline: true },
+      { name: "🚨 /worstdrivers", value: `Rank by total penalties. ${lbOptionNote}`, inline: true },
+      { name: "🛠️ /clearstats",   value: "**(Owner Only)** Reset a user's stats completely.", inline: true },
+      { name: "🚫 /suspenduser",  value: isHQ ? "🚫 **(Owner Only)** Suspend a user from logging jobs." : "**(Owner Only)** Completely delete a user's account and remove all their run logs/contributions.", inline: true },
+      ...radioFields,
       { name: "ℹ️ /help", value: "Show this information menu.", inline: true }
     ],
     footer: {

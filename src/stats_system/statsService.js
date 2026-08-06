@@ -4,12 +4,25 @@ const { validateRun } = require("../anticheat");
 const { updateLeaderboard, updateGlobalWebhook } = require("./leaderboardService");
 
 async function checkPlayerGuild(discordId, targetGuildId) {
+  const isHQ = targetGuildId === process.env.HQ_GUILD_ID;
+
   const { data: player } = await supabase
     .from("players")
     .select("guild_id")
     .eq("discord_id", discordId)
     .maybeSingle();
 
+  // ── HQ SERVER: everyone is welcome, no lock needed ──
+  if (isHQ) return;
+
+  // ── VTC SERVER: block Independent Drivers ──
+  if (player && !player.guild_id) {
+    throw new Error(
+      `🚫 You are registered as an **Independent Driver**.\nPlease log your jobs in the **Headquarters** server — not here.`
+    );
+  }
+
+  // ── VTC SERVER: block drivers from other companies ──
   if (player && player.guild_id && player.guild_id !== targetGuildId) {
     const { data: playerGuild } = await supabase
       .from("approved_guilds")
@@ -27,6 +40,8 @@ async function checkPlayerGuild(discordId, targetGuildId) {
 }
 
 async function getOrCreatePlayer(discordId, username, displayName, guildId) {
+  const isHQ = guildId === process.env.HQ_GUILD_ID;
+
   // Check if player already exists (GLOBAL - not per-server)
   let { data: player } = await supabase
     .from("players")
@@ -35,25 +50,33 @@ async function getOrCreatePlayer(discordId, username, displayName, guildId) {
     .single();
 
   // Verify server is approved (for display/branding purposes only)
-  const { data: guild } = await supabase
-    .from("approved_guilds")
-    .select("guild_tag")
-    .eq("guild_id", guildId)
-    .single();
+  // HQ is approved by definition — skip the DB check for it
+  let guildTag = null;
+  if (!isHQ) {
+    const { data: guild } = await supabase
+      .from("approved_guilds")
+      .select("guild_tag")
+      .eq("guild_id", guildId)
+      .single();
 
-  if (!guild) throw new Error("❌ This server is not an approved VTC.");
+    if (!guild) throw new Error("❌ This server is not an approved VTC.");
+    guildTag = guild.guild_tag;
+  }
 
   // New player registration
   if (!player) {
+    const insertPayload = {
+      discord_id: discordId,
+      username,
+      display_name: displayName,
+      // HQ registrations = Independent Driver (null guild)
+      guild_id: isHQ ? null : guildId,
+      guild_tag: isHQ ? null : guildTag
+    };
+
     const { data: newPlayer, error } = await supabase
       .from("players")
-      .insert({
-        discord_id: discordId,
-        username,
-        display_name: displayName,
-        guild_id: guildId, // Store for display purposes only, not for locking
-        guild_tag: guild.guild_tag
-      })
+      .insert(insertPayload)
       .select()
       .single();
 

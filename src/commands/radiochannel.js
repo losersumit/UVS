@@ -11,6 +11,9 @@ const { EmbedBuilder, ChannelType } = require("discord.js");
 const { supabase } = require("../stats_system/supabase");
 
 async function setradiochannel(interaction) {
+  // Radio module is disabled in the HQ server
+  if (interaction.guild.id === process.env.HQ_GUILD_ID) return;
+
   const channel = interaction.options.getChannel("channel");
 
   await interaction.deferReply(); // non-ephemeral

@@ -53,6 +53,9 @@ async function reactWithErrorCode(message, codeString) {
 function getErrorCodeForError(err) {
   const msg = err.message || "";
   
+  if (msg.includes("Independent Driver")) {
+    return "107";
+  }
   if (msg.includes("You are a driver at")) {
     return "102";
   }
@@ -288,6 +291,28 @@ function registerScreenshotListener(client) {
 
       await message.reactions.cache.get("⏳")?.remove().catch(() => {});
       await message.react("1530697317697585153"); // <a:green_tick:1530697317697585153>
+
+      // ── HQ Server: react with VTC logo emoji if the driver belongs to a company ──
+      const isHQServer = message.guild.id === process.env.HQ_GUILD_ID;
+      if (isHQServer && player.guild_id) {
+        try {
+          const { data: vtcRow } = await supabase
+            .from("approved_guilds")
+            .select("logo_emojis")
+            .eq("guild_id", player.guild_id)
+            .maybeSingle();
+
+          if (vtcRow?.logo_emojis) {
+            // Parse emoji string like <:HLT:1534843687132205209> and extract the ID
+            const emojiMatch = vtcRow.logo_emojis.match(/<a?:[\w]+:(\d+)>/);
+            if (emojiMatch) {
+              await message.react(emojiMatch[1]).catch(() => {});
+            }
+          }
+        } catch (logoErr) {
+          console.error("[HQ Logo React] Failed to react with VTC logo:", logoErr.message);
+        }
+      }
 
       // Use server-specific star emojis
       if (starsEarned >= 1) await message.react(guildConfig.star_1_emoji).catch(() => { });

@@ -25,7 +25,10 @@ async function execute(interaction) {
     .select("level, total_distance_km, total_time_minutes, best_avg_speed_kmph, total_score, total_stars, clean_deliveries, total_damage_penalty, total_time_penalty, players!inner(guild_id)");
 
   const activeIds = await getActiveGuildIds();
-  const allStats = (allStatsRaw || []).filter(s => activeIds.includes(s.players?.guild_id));
+  // Include VTC drivers + independent drivers (null guild_id) in rank pool
+  const allStats = (allStatsRaw || []).filter(s =>
+    s.players?.guild_id === null || activeIds.includes(s.players?.guild_id)
+  );
 
   // Calculate all ranks in a single pass
   const userValues = {
@@ -55,8 +58,11 @@ async function execute(interaction) {
 
   const guildConfig = await getGuildConfig(interaction.guild.id);
 
+  const tag = stats.players?.guild_tag || "";
+  const driverLabel = tag ? `${tag} ${displayName}` : `🚗 ${displayName} (Independent Driver)`;
+
   const embed = {
-    title: `📊 Stats for ${stats.players.guild_tag} ${displayName}`,
+    title: `📊 Stats for ${driverLabel}`,
     color: guildConfig.embed_color,
     thumbnail: guildConfig.thumbnail ? { url: guildConfig.thumbnail } : undefined,
     fields: [

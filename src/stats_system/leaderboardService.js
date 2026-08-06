@@ -136,7 +136,37 @@ async function performLeaderboardUpdate(client, guildId) {
 
     if (activeGuildIds.length === 0) return; // Nothing to show
 
+    const isHQ = guildId === process.env.HQ_GUILD_ID;
+
     // 4. Fetch all data in parallel
+    // For the HQ server, distance/time LBs are global (all VTCs + independents)
+    // For regular VTC servers, they are filtered by the guild's own members
+    const distanceQuery = isHQ
+      ? supabase.from("player_stats")
+          .select("total_distance_km, players!inner(username, display_name, guild_tag, guild_id)")
+          .or(`guild_id.in.(${activeGuildIds.join(",")}),guild_id.is.null`, { referencedTable: "players" })
+          .gt("total_distance_km", 0)
+          .order("total_distance_km", { ascending: false })
+          .limit(5)
+      : supabase.from("player_stats")
+          .select("total_distance_km, players!inner(username, display_name, guild_tag, guild_id)")
+          .eq("players.guild_id", guildId)
+          .order("total_distance_km", { ascending: false })
+          .limit(5);
+
+    const timeQuery = isHQ
+      ? supabase.from("player_stats")
+          .select("total_time_minutes, players!inner(username, display_name, guild_tag, guild_id)")
+          .or(`guild_id.in.(${activeGuildIds.join(",")}),guild_id.is.null`, { referencedTable: "players" })
+          .gt("total_time_minutes", 0)
+          .order("total_time_minutes", { ascending: false })
+          .limit(5)
+      : supabase.from("player_stats")
+          .select("total_time_minutes, players!inner(username, display_name, guild_tag, guild_id)")
+          .eq("players.guild_id", guildId)
+          .order("total_time_minutes", { ascending: false })
+          .limit(5);
+
     const [
       { data: guildsData },
       { data: guildStats },
@@ -145,21 +175,39 @@ async function performLeaderboardUpdate(client, guildId) {
     ] = await Promise.all([
       supabase.from("approved_guilds").select("guild_id, guild_tag, guild_name, net_worth, runs").eq("is_suspended", false),
       supabase.from("player_stats").select("total_score, total_time_minutes, total_stars, total_distance_km, clean_deliveries, players!inner(guild_id)"),
-      supabase.from("player_stats")
-        .select("total_distance_km, players!inner(username, display_name, guild_tag, guild_id)")
-        .eq("players.guild_id", guildId)
-        .order("total_distance_km", { ascending: false })
-        .limit(5),
-      supabase.from("player_stats")
-        .select("total_time_minutes, players!inner(username, display_name, guild_tag, guild_id)")
-        .eq("players.guild_id", guildId)
-        .order("total_time_minutes", { ascending: false })
-        .limit(5)
+      distanceQuery,
+      timeQuery
     ]);
 
-    // ─── EMBED 1: VTC Stats Embed (formerly myvtc) ───
+    // ─── EMBED 1: For HQ → Global UVS Dashboard. For VTC → own VTC stats card. ───
     let guildEmbed = null;
-    if (guildsData && guildStats) {
+
+    if (isHQ) {
+      // ── Global UVS Dashboard for the Headquarters server ──
+      const [{ count: totalPlayers }, { data: allStats }] = await Promise.all([
+        supabase.from("players").select("*", { count: "exact", head: true }),
+        supabase.from("player_stats").select("total_distance_km, total_time_minutes")
+      ]);
+
+      const activeVTCCount = (guildsData || []).filter(g => g.guild_id !== process.env.HQ_GUILD_ID).length;
+      const totalDistanceKm = (allStats || []).reduce((s, r) => s + (Number(r.total_distance_km) || 0), 0);
+      const totalTimeMin    = (allStats || []).reduce((s, r) => s + (Number(r.total_time_minutes) || 0), 0);
+
+      guildEmbed = {
+        title: "🌐 UVS — Network Status",
+        description: "Live statistics across all registered VTCs and Independent Drivers.",
+        color: guildConfig.embed_color,
+        thumbnail: guildConfig.thumbnail ? { url: guildConfig.thumbnail } : undefined,
+        fields: [
+          { name: "👤 Registered Truckers", value: `${(totalPlayers || 0).toLocaleString()}`, inline: true },
+          { name: "🏢 Unified VTCs",       value: `${activeVTCCount}`,                       inline: true },
+          { name: "🛤️ Total Distance",     value: formatDistance(totalDistanceKm),            inline: true },
+          { name: "⏱️ Total Drive Time",   value: formatHours(totalTimeMin),                 inline: true }
+        ],
+        footer: { text: "Managed by NMC" }
+      };
+
+    } else if (guildsData && guildStats) {
       const guildAggregates = new Map();
       for (const g of guildsData) {
         guildAggregates.set(g.guild_id, {
@@ -323,14 +371,13 @@ async function updateGlobalWebhook(client, guildId = null) {
 }
 
 async function performGlobalWebhookUpdate(client, guildId = null) {
-  const webhookUrl = process.env.GLOBAL_LB_WEBHOOK_URL;
-  if (!webhookUrl) return;
+  const webhookUrlsStr = process.env.GLOBAL_LB_WEBHOOK_URL;
+  if (!webhookUrlsStr) return;
+
+  const webhookUrls = webhookUrlsStr.split(",").map(url => url.trim()).filter(url => url.length > 0);
+  if (webhookUrls.length === 0) return;
 
   try {
-    const webhookClient = new WebhookClient({ url: webhookUrl });
-
-    // Emojis removed string formatting due to external webhook restrictions
-
     // ───────────── Guilds Leaderboard ─────────────
     let guildsQuery = supabase
       .from("approved_guilds")
@@ -379,6 +426,8 @@ async function performGlobalWebhookUpdate(client, guildId = null) {
     }
 
     for (const guild of guildAggregates.values()) {
+      // Skip the HQ guild — it does not get a personal VTC card in the webhook
+      if (guild.guild_id === process.env.HQ_GUILD_ID) continue;
       let description = 
         `💰 Net Worth   : **$${formatCompact(guild.total_income)}**\n` +
         `👥 Drivers     : **${guild.driver_count}**\n` +
@@ -417,31 +466,48 @@ async function performGlobalWebhookUpdate(client, guildId = null) {
         footer: { text: footerText }
       };
 
-      const messageId = guild.webhook_id ? String(guild.webhook_id).trim() : null;
+      const storedIds = guild.webhook_id ? String(guild.webhook_id).split(",").map(id => id.trim()) : [];
+      const newIds = [];
 
-      if (messageId) {
-        try {
-          await webhookClient.editMessage(messageId, { content: null, embeds: [embed] });
-          continue;
-        } catch (err) {
-          console.warn(`[Global Webhook] Failed to edit msg for ${guild.guild_tag} ${guild.guild_name} (${err.message}). Sending new msg...`);
+      for (let idx = 0; idx < webhookUrls.length; idx++) {
+        const url = webhookUrls[idx];
+        const messageId = storedIds[idx] || null;
+        const webhookClient = new WebhookClient({ url });
+
+        let sentId = null;
+        if (messageId) {
+          try {
+            await webhookClient.editMessage(messageId, { content: null, embeds: [embed] });
+            sentId = messageId;
+          } catch (err) {
+            console.warn(`[Global Webhook] Failed to edit msg ${messageId} on webhook ${idx}: ${err.message}. Sending new msg...`);
+          }
+        }
+
+        if (!sentId) {
+          try {
+            const sentMessage = await webhookClient.send({ content: null, embeds: [embed] });
+            sentId = sentMessage.id;
+            console.log(`[Global Webhook] Sent new embed on webhook ${idx} (ID: ${sentId})`);
+          } catch (err) {
+            console.error(`[Global Webhook] Failed to send to webhook ${idx}:`, err.message);
+          }
+        }
+
+        if (sentId) {
+          newIds.push(sentId);
+        } else {
+          newIds.push(messageId || "");
         }
       }
 
-      try {
-        const sentMessage = await webhookClient.send({ content: null, embeds: [embed] });
-        console.log(`[Global Webhook] Sent new embed for ${guild.guild_tag} ${guild.guild_name} (ID: ${sentMessage.id})`);
+      const serializedIds = newIds.join(",");
+      const { error: saveErr } = await supabase
+        .from("approved_guilds")
+        .update({ webhook_id: serializedIds })
+        .eq("guild_id", guild.guild_id);
 
-        // Save the new message ID so future updates can edit it instead of re-sending
-        const { error: saveErr } = await supabase
-          .from("approved_guilds")
-          .update({ webhook_id: sentMessage.id })
-          .eq("guild_id", guild.guild_id);
-
-        if (saveErr) console.error(`[Global Webhook] Failed to save webhook_id for ${guild.guild_tag} ${guild.guild_name}:`, saveErr.message);
-      } catch (err) {
-        console.error(`[Global Webhook] Failed to send new msg for ${guild.guild_tag} ${guild.guild_name}:`, err.message);
-      }
+      if (saveErr) console.error(`[Global Webhook] Failed to save webhook_id for ${guild.guild_tag} ${guild.guild_name}:`, saveErr.message);
     }
 
   } catch (err) {
