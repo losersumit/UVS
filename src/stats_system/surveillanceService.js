@@ -176,17 +176,27 @@ async function syncAllMembers(client) {
 
     const guildTagMap = new Map(approvedGuilds.map(g => [g.guild_id, g.guild_tag]));
 
-    // 2. Fetch existing surveillance records
-    const { data: existingRecords, error: recordError } = await supabase
-      .from("member_surveillance")
-      .select("*");
+    // 2. Fetch existing surveillance records (paginated to handle >1000 records)
+    const existingRecords = [];
+    let page = 0;
+    const pageSize = 1000;
+    while (true) {
+      const { data, error: recordError } = await supabase
+        .from("member_surveillance")
+        .select("*")
+        .range(page * pageSize, (page + 1) * pageSize - 1);
 
-    if (recordError) {
-      console.error("❌ [Surveillance] Error fetching member_surveillance records:", recordError);
-      return;
+      if (recordError) {
+        console.error("❌ [Surveillance] Error fetching member_surveillance records:", recordError);
+        return;
+      }
+      if (!data || data.length === 0) break;
+      existingRecords.push(...data);
+      if (data.length < pageSize) break;
+      page++;
     }
 
-    const surveillanceMap = new Map((existingRecords || []).map(r => [r.discord_id, r]));
+    const surveillanceMap = new Map(existingRecords.map(r => [r.discord_id, r]));
 
     // 3. Scan all members in all approved guilds
     // Group active memberships by user ID
