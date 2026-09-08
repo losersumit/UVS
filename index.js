@@ -38,6 +38,7 @@ const { suspendvtc, restorevtc } = require("./src/commands/vtc");
 const adminCmd = require("./src/commands/admin");
 const suspenduserCmd = require("./src/commands/suspenduser");
 const changeguildCmd = require("./src/commands/changeguild");
+const changelevelCmd = require("./src/commands/changelevel");
 const helpCmd = require("./src/commands/help");
 const radioCmd = require("./src/commands/radio");
 const radiochannelCmd = require("./src/commands/radiochannel");
@@ -61,6 +62,7 @@ const commandHandlers = {
   clearstats: adminCmd.execute,
   suspenduser: suspenduserCmd.execute,
   changeguild: changeguildCmd.execute,
+  changelevel: changelevelCmd.execute,
   help: helpCmd.execute,
   setradiofrequency: radioCmd.execute,
   setradiochannel: radiochannelCmd.execute,
@@ -202,6 +204,16 @@ client.once("clientReady", async () => {
     { name: "worstdrivers", description: "View worst drivers by penalties", options: [{ name: "global", description: "Show all approved VTC members", type: 5, required: false }] },
     { name: "bestdrivers", description: "View best drivers by clean deliveries", options: [{ name: "global", description: "Show all approved VTC members", type: 5, required: false }] },
     { name: "clearstats", description: "Clear a user's stats (Owner Only)", options: [{ name: "user", description: "User to clear", type: 6, required: true }] },
+    {
+      name: "changelevel",
+      description: "Change a driver's career level (Owner Only)",
+      options: [
+        { name: "new_level", description: "The new level to set", type: 4, required: true },
+        { name: "user", description: "Mention user", type: 6, required: false },
+        { name: "user_id", description: "Discord User ID", type: 3, required: false },
+        { name: "username", description: "Driver username", type: 3, required: false }
+      ]
+    },
     { name: "suspenduser", description: "Suspend a user and completely remove their contributions (Owner Only)", options: [{ name: "user", description: "User to suspend", type: 6, required: true }, { name: "reason", description: "Reason for suspension", type: 3, required: true }] },
     { name: "changeguild", description: "Change a user's guild/company (Owner Only)", options: [{ name: "user", description: "User to move", type: 6, required: true }] },
     { name: "suspendvtc", description: "Suspend a VTC from leaderboards (Owner Only)", options: [{ name: "guild_id", type: 3, description: "ID of the server", required: true }] },
@@ -249,6 +261,16 @@ client.once("clientReady", async () => {
     { name: "worstdrivers", description: "View worst drivers by penalties (Global)" },
     { name: "bestdrivers", description: "View best drivers by clean deliveries (Global)" },
     { name: "clearstats",  description: "Reset a user's stats (Owner Only)", options: [{ name: "user", description: "User to clear", type: 6, required: true }] },
+    {
+      name: "changelevel",
+      description: "Change a driver's career level (Owner Only)",
+      options: [
+        { name: "new_level", description: "The new level to set", type: 4, required: true },
+        { name: "user", description: "Mention user", type: 6, required: false },
+        { name: "user_id", description: "Discord User ID", type: 3, required: false },
+        { name: "username", description: "Driver username", type: 3, required: false }
+      ]
+    },
     { name: "suspenduser", description: "Suspend a user from logging jobs (Owner Only)", options: [{ name: "user", description: "User to suspend", type: 6, required: true }, { name: "reason", description: "Reason for suspension", type: 3, required: true }] },
     { name: "help", description: "Show bot instructions and commands" },
     { name: "codes", description: "View the job log error codes" }
