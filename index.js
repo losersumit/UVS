@@ -43,6 +43,7 @@ const helpCmd = require("./src/commands/help");
 const radioCmd = require("./src/commands/radio");
 const radiochannelCmd = require("./src/commands/radiochannel");
 const codesCmd = require("./src/commands/codes");
+const activateunbeconomyCmd = require("./src/commands/activateunbeconomy");
 const { handleRadioMessage } = require("./src/radioManager");
 const { updateRadioDirectory } = require("./src/stats_system/radioDirectory");
 const { handleMemberJoin, handleMemberLeave, syncAllMembers } = require("./src/stats_system/surveillanceService");
@@ -67,6 +68,7 @@ const commandHandlers = {
   setradiofrequency: radioCmd.execute,
   setradiochannel: radiochannelCmd.execute,
   codes: codesCmd.execute,
+  activateunbeconomy: activateunbeconomyCmd.execute,
 };
 
 const client = new Client({
@@ -247,6 +249,10 @@ client.once("clientReady", async () => {
     {
       name: "codes",
       description: "View the job log error codes (Owner Only)"
+    },
+    {
+      name: "activateunbeconomy",
+      description: "Activate UnbelievaBoat economy integration for this server (Owner Only)"
     }
   ];
 
@@ -273,7 +279,8 @@ client.once("clientReady", async () => {
     },
     { name: "suspenduser", description: "Suspend a user from logging jobs (Owner Only)", options: [{ name: "user", description: "User to suspend", type: 6, required: true }, { name: "reason", description: "Reason for suspension", type: 3, required: true }] },
     { name: "help", description: "Show bot instructions and commands" },
-    { name: "codes", description: "View the job log error codes" }
+    { name: "codes", description: "View the job log error codes" },
+    { name: "activateunbeconomy", description: "Activate UnbelievaBoat economy integration for this server (Owner Only)" }
   ];
 
   // Register commands per-guild

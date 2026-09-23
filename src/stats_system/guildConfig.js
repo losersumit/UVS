@@ -48,7 +48,8 @@ async function getGuildConfig(guildId) {
     star_3_emoji: "<a:starc:1530926869191462952>",
 
     // Features
-    enable_clear_stats: guild.enable_clear_stats !== false // default true
+    enable_clear_stats: guild.enable_clear_stats !== false, // default true
+    enable_unb_economy: guild.enable_unb_economy === true // default false
   };
 
   // Cache it
@@ -72,7 +73,8 @@ function getDefaultConfig() {
     star_1_emoji: "<a:stara:1530926858646847488>",
     star_2_emoji: "<a:starb:1530926845413818439>",
     star_3_emoji: "<a:starc:1530926869191462952>", 
-    enable_clear_stats: true
+    enable_clear_stats: true,
+    enable_unb_economy: false
   };
 }
 

@@ -11,6 +11,7 @@ const { getGuildConfig } = require("./guildConfig");
 const { mirrorJobLog } = require("./jobLogMirror");
 const { isUserSuspended, alertSuspendedAttempt } = require("./suspendedUsers");
 const { EmbedBuilder } = require("discord.js");
+const { addUnbCash } = require("./unbService");
 
 // image extensions we accept
 const VALID_IMAGE_TYPES = ["png", "jpg", "jpeg", "webp"];
@@ -288,6 +289,16 @@ function registerScreenshotListener(client) {
         ocrResult,
         client
       );
+
+      // ── UNB Economy Integration: Add money to UNB account if enabled ──
+      if (guildConfig.enable_unb_economy) {
+        const incomeAmount = Number(ocrResult.income) || 0;
+        if (incomeAmount > 0) {
+          addUnbCash(message.guild.id, message.author.id, incomeAmount, "UVS Job Log Payout").catch(err => {
+            console.error("[UNB_HOOK_ERROR] Failed to trigger UNB cash add:", err);
+          });
+        }
+      }
 
       await message.reactions.cache.get("⏳")?.remove().catch(() => {});
       await message.react("1530697317697585153"); // <a:green_tick:1530697317697585153>
