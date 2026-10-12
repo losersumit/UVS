@@ -316,8 +316,62 @@ client.on("guildCreate", async (guild) => {
 client.on("interactionCreate", async (interaction) => {
   // ─── Slash Commands ───
   if (interaction.isChatInputCommand()) {
-    if (interaction.guild && !await isGuildApproved(interaction.guild.id)) {
+    if (!interaction.guild) {
+      return interaction.reply({ content: "❌ Commands can only be used inside an approved UVS server.", ephemeral: true });
+    }
+
+    if (!await isGuildApproved(interaction.guild.id)) {
       return interaction.reply({ content: "❌ Unauthorized server.", ephemeral: true });
+    }
+
+    // All non-owner slash commands require a registered UVS player record.
+    // Owner commands remain available for administration and account recovery.
+    const { isOwner } = require("./src/owner");
+    if (!isOwner(interaction.user.id)) {
+      const { data: registeredPlayer, error: registrationError } = await supabase
+        .from("players")
+        .select("id")
+        .eq("discord_id", interaction.user.id)
+        .maybeSingle();
+
+      if (registrationError) {
+        console.error("[CommandGuard] Registration lookup failed:", registrationError);
+        return interaction.reply({
+          content: "❌ UVS could not verify your registration. Please try again later.",
+          ephemeral: true
+        });
+      }
+
+      if (!registeredPlayer) {
+        return interaction.reply({
+          content: "❌ You are not registered with UVS. Register by submitting a valid job log in the designated screenshot channel before using commands.",
+          ephemeral: true
+        });
+      }
+
+      // Suspended users cannot access /stats at all, including stats for other users.
+      if (interaction.commandName === "stats") {
+        const { data: suspension, error: suspensionError } = await supabase
+          .from("suspended_users")
+          .select("id")
+          .eq("discord_id", interaction.user.id)
+          .maybeSingle();
+
+        if (suspensionError) {
+          console.error("[CommandGuard] Suspension lookup failed:", suspensionError);
+          return interaction.reply({
+            content: "❌ UVS could not verify your account status. Please try again later.",
+            ephemeral: true
+          });
+        }
+
+        if (suspension) {
+          return interaction.reply({
+            content: "❌ Your UVS account is suspended. You cannot use /stats while your suspension is active.",
+            ephemeral: true
+          });
+        }
+      }
     }
 
     const handler = commandHandlers[interaction.commandName];
