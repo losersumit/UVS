@@ -18,14 +18,10 @@ async function execute(interaction) {
     ? "All leaderboard commands are **global** in this server — no option needed."
     : "Default is current server only. Set `global: True` for all servers.";
 
-  const radioFields = isHQ
-    ? [
-        { name: "📡 Radio Module", value: "🚫 The radio broadcast module is **disabled** in this server.", inline: false }
-      ]
-    : [
-        { name: "📡 /setradiofrequency [freq]", value: "Tune into a radio frequency between 100.00 and 120.00 MHz (e.g., `119.88`).", inline: true },
-        { name: "📻 Radio Broadcast (+rd)", value: "Prefix any message with `+rd ` to broadcast it to all VTCs sharing your frequency. Their designated call channel will receive it. (**100.00 MHz** is the Help & Support frequency monitored by NMC).", inline: false }
-      ];
+  const radioFields = [
+    { name: "📡 /setradiofrequency [freq]", value: "Tune into a radio frequency between 100.00 and 120.00 MHz (e.g., `119.88`).", inline: true },
+    { name: "📻 Radio Broadcast (+rd)", value: "Prefix any message with `+rd ` to broadcast it to all VTCs sharing your frequency. Their designated call channel will receive it. (**100.00 MHz** is the Help & Support frequency monitored by NMC).", inline: false }
+  ];
 
   const helpEmbed = {
     title: "🚛 UVS Bot Help & Commands",

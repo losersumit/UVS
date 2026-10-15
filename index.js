@@ -278,7 +278,35 @@ client.once("clientReady", async () => {
       ]
     },
     { name: "suspenduser", description: "Suspend a user from logging jobs (Owner Only)", options: [{ name: "user", description: "User to suspend", type: 6, required: true }, { name: "reason", description: "Reason for suspension", type: 3, required: true }] },
+    { name: "changeguild", description: "Change a user's guild/company (Owner Only)", options: [{ name: "user", description: "User to move", type: 6, required: true }] },
+    { name: "suspendvtc", description: "Suspend a VTC from leaderboards (Owner Only)", options: [{ name: "guild_id", type: 3, description: "ID of the server", required: true }] },
+    { name: "restorevtc", description: "Restore a suspended VTC to leaderboards (Owner Only)", options: [{ name: "guild_id", type: 3, description: "ID of the server", required: true }] },
     { name: "help", description: "Show bot instructions and commands" },
+    {
+      name: "setradiofrequency",
+      description: "Set the radio frequency for cross-server transmissions",
+      options: [
+        {
+          name: "frequency",
+          description: "Frequency between 100.00 and 120.00 MHz (e.g., 119.88)",
+          type: 10,
+          required: true
+        }
+      ]
+    },
+    {
+      name: "setradiochannel",
+      description: "Set the channel where incoming radio transmissions are delivered",
+      options: [
+        {
+          name: "channel",
+          description: "The text channel UVS has access to",
+          type: 7,
+          required: true,
+          channel_types: [0, 5, 10, 11, 12]
+        }
+      ]
+    },
     { name: "codes", description: "View the job log error codes" },
     { name: "activateunbeconomy", description: "Activate UnbelievaBoat economy integration for this server (Owner Only)" }
   ];

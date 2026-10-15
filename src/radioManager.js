@@ -37,8 +37,6 @@ async function handleRadioMessage(message) {
 
   const senderGuildId = message.guild.id;
 
-  // Radio module is disabled in the HQ server
-  if (senderGuildId === process.env.HQ_GUILD_ID) return;
 
   // 1. Fetch sender's radio frequency and configuration
   const { data: senderGuild, error: senderError } = await supabase
