@@ -9,12 +9,17 @@
 const { EmbedBuilder } = require("discord.js");
 const { supabase } = require("./supabase");
 
-const DIRECTORY_GUILD_ID = "1448027116074434593";
-const DIRECTORY_CHANNEL_ID = "1517168280475799604";
+const DIRECTORY_GUILD_ID = process.env.HQ_GUILD_ID;
+const DIRECTORY_CHANNEL_ID = process.env.CENTRAL_RADIO_CHANNEL_ID;
 const DIRECTORY_TITLE = "📻  Central Radio Directory";
 
 async function updateRadioDirectory(client) {
   try {
+    if (!DIRECTORY_CHANNEL_ID) {
+      console.error("[RadioDirectory] Missing CENTRAL_RADIO_CHANNEL_ID in environment.");
+      return;
+    }
+
     // 1. Fetch all approved non-suspended VTCs from database
     const { data: guilds, error } = await supabase
       .from("approved_guilds")
