@@ -28,6 +28,7 @@ const { updateLeaderboard, updateGlobalWebhook } = require("./src/stats_system/l
 const { registerDailyInspector } = require("./src/stats_system/dailyInspector");
 const { registerDisplayNameSync } = require("./src/stats_system/displayNameSync");
 const { registerLeaderboardChannelCleaner } = require("./src/stats_system/leaderboardChannelCleaner");
+const { registerRetryService } = require("./src/stats_system/retryService");
 const { isGuildApproved } = require("./src/guildGuard");
 
 // ─── Command Modules ───
@@ -102,6 +103,9 @@ client.once("clientReady", async () => {
 
   // Register Leaderboard Channel Cleaner (on restart + 1 AM daily)
   registerLeaderboardChannelCleaner(client);
+
+  // Register 15-minute Job Report Retry Service
+  registerRetryService(client);
 
   // Update Global Webhook on Restart
   updateGlobalWebhook(client).catch(err =>

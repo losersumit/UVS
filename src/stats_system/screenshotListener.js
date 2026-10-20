@@ -12,6 +12,7 @@ const { mirrorJobLog } = require("./jobLogMirror");
 const { isUserSuspended, alertSuspendedAttempt } = require("./suspendedUsers");
 const { EmbedBuilder } = require("discord.js");
 const { addUnbCash } = require("./unbService");
+const { scheduleImageRetry } = require("./retryService");
 
 // image extensions we accept
 const VALID_IMAGE_TYPES = ["png", "jpg", "jpeg", "webp"];
@@ -66,6 +67,9 @@ function getErrorCodeForError(err) {
   if (msg.includes("No Cheating") || msg.includes("duplicate")) {
     return "104";
   }
+  if (msg.includes("Layout verification failed") || msg.includes("does not match")) {
+    return "105";
+  }
   if (msg.includes("Invalid distance or time")) {
     return "203";
   }
@@ -88,12 +92,16 @@ function getErrorCodeForError(err) {
     return "209";
   }
   
-  return "301";
+  return null; // System / API temporary errors are queued for retry instead of sending code 301
 }
 
 function registerScreenshotListener(client) {
   client.on("messageCreate", async (message) => {
     let mirroredMessage = null;
+    let imageBuffer = null;
+    let contentType = null;
+    let attachmentUrl = null;
+
     try {
       // ignore bots
       if (message.author.bot) return;
@@ -172,6 +180,7 @@ function registerScreenshotListener(client) {
       }
 
       const attachment = [...message.attachments.values()][0];
+      attachmentUrl = attachment.url;
 
       // attachment must be an image
       if (!isValidImage(attachment.url)) {
@@ -199,9 +208,10 @@ function registerScreenshotListener(client) {
       await checkPlayerGuild(message.author.id, message.guild.id);
 
       const imgResp = await axios.get(attachment.url, { responseType: "arraybuffer" });
+      contentType = imgResp.headers["content-type"] || "image/jpeg";
+      imageBuffer = Buffer.from(imgResp.data);
 
       // Hash is synchronous
-      const imageBuffer = Buffer.from(imgResp.data);
       const imageHash = crypto
         .createHash("sha256")
         .update(imageBuffer)
@@ -209,7 +219,7 @@ function registerScreenshotListener(client) {
 
       const [{ data: existing }, ocrResult] = await Promise.all([
         supabase.from("runs").select("id").eq("image_hash", imageHash).limit(1),
-        extractStatsWithGemini(imageBuffer, attachment.url)
+        extractStatsWithGemini(imageBuffer, attachment.url, contentType)
       ]);
 
       // ── Edit mirrored message with OCR extracted data as soon as OCR is complete ──
@@ -253,8 +263,28 @@ function registerScreenshotListener(client) {
         return;
       }
 
-      // 2️⃣ OCR validity check
-      if (!ocrResult || ocrResult.valid === false) {
+      // 2️⃣ AI Failure / Pipeline Unreachable (Queue for 15-minute retry)
+      if (ocrResult === null) {
+        console.log(`[ScreenshotListener] AI Pipeline temporarily unavailable. Queuing for 15-minute retry...`);
+        if (imageBuffer) {
+          await scheduleImageRetry({
+            message,
+            mirroredMessage,
+            imageBuffer,
+            contentType,
+            authorId: message.author.id,
+            guildId: message.guild.id,
+            authorUsername: message.author.username,
+            authorDisplayName: message.author.globalName || message.member?.displayName || message.author.username,
+            originalUrl: attachmentUrl
+          });
+        }
+        return;
+      }
+
+      // 3️⃣ Visual Layout Anticheat Rejection (Code 105)
+      if (ocrResult.valid === false) {
+        console.log(`[ScreenshotListener] Image rejected: does not match TOE3 layout. Reacting with Code 105.`);
         await message.reactions.cache.get("⏳")?.remove().catch(() => {});
         await reactWithErrorCode(message, "105");
 
@@ -265,7 +295,7 @@ function registerScreenshotListener(client) {
             if (firstAttachment) {
               embed.setImage(`attachment://${firstAttachment.name}`);
             }
-            embed.setDescription(embed.data.description + "\n\n<a:rejected_redo:1530700762219544637> Rejected (Code: 105)");
+            embed.setDescription(embed.data.description + "\n\n<a:rejected_redo:1530700762219544637> Rejected (Code: 105 - Layout Verification Failed)");
             await mirroredMessage.edit({ embeds: [embed] });
           } catch (editErr) {
             console.error("[MIRROR_EDIT] Failed to edit mirror status:", editErr);
@@ -350,8 +380,29 @@ function registerScreenshotListener(client) {
       console.error("Screenshot listener error:", err);
 
       try {
-        await message.reactions.cache.get("⏳")?.remove().catch(() => {});
         const code = getErrorCodeForError(err);
+
+        // If no definitive code (e.g. unexpected system/DB/timeout error previously code 301), queue for 15-minute retry!
+        if (!code) {
+          console.log(`[ScreenshotListener] Temporary system/network exception caught. Queuing for 15-minute retry...`);
+          if (imageBuffer) {
+            await scheduleImageRetry({
+              message,
+              mirroredMessage,
+              imageBuffer,
+              contentType,
+              authorId: message.author.id,
+              guildId: message.guild.id,
+              authorUsername: message.author.username,
+              authorDisplayName: message.author.globalName || message.member?.displayName || message.author.username,
+              originalUrl: attachmentUrl
+            });
+          }
+          return;
+        }
+
+        // For definitive rejections (102, 103, 104, 105, 106, 107, 203-209), remove ⏳ and react with error code
+        await message.reactions.cache.get("⏳")?.remove().catch(() => {});
         await reactWithErrorCode(message, code);
 
         if (code === "102") {

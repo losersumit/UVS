@@ -1,27 +1,20 @@
 /**
  * ============================================================================
  * MODULE: modelRouter.js
- * PURPOSE: Handles API connections to the Groq LLM inference engine. Serves
- *          as the routing layer for AI features, including Vision and Reasoning.
- *          Implements model fallback (Scout -> Qwen) for stability.
- *
- * NOTE: Vision calls use axios.post directly (not the groq-sdk) — this matches
- *       the proven pattern used by the worker bot and avoids the fetch-based
- *       timeout issues the SDK has on Railway for large image payloads.
+ * PURPOSE: Handles AI model routing and execution.
+ *          Implements 3-Stage Batch Fallback for OCR & Vision processing:
+ *            Stage 1: First 4 Gemini keys (sent in parallel, first to succeed wins)
+ *            Stage 2: Next 5 Gemini keys (sent in parallel, first to succeed wins)
+ *            Stage 3: OpenRouter API (Minimax vision model)
+ *          Also provides text-based reasoning via Groq with round-robin key rotation.
  * ============================================================================
  */
-// .uvs/src/modelRouter.js
 
 const axios = require("axios");
 const Groq  = require("groq-sdk");
+const { GoogleGenAI } = require("@google/genai");
 
-// SDK is only used for text-only reasoning (no large payloads, no timeout issue)
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
-
-const GROQ_ENDPOINT = "https://api.groq.com/openai/v1/chat/completions";
-const VISION_TIMEOUT_MS = 30_000; // 30s — consistent with the worker bot
-
-// ─── GROQ KEYS ROTATION ───
+// ─── GROQ KEYS ROTATION (Reasoning) ───
 const GROQ_KEYS = [
   process.env.GROQ_API_KEY,
   process.env.GROQ_API_KEY_ONE,
@@ -34,16 +27,37 @@ const GROQ_KEYS = [
   process.env.GROQ_API_KEY_EIGHT,
 ].filter(Boolean);
 
-let keyIndex = 0;
+let groqKeyIndex = 0;
 function getNextApiKey() {
   if (GROQ_KEYS.length === 0) return null;
-  const key = GROQ_KEYS[keyIndex % GROQ_KEYS.length];
-  keyIndex++;
+  const key = GROQ_KEYS[groqKeyIndex % GROQ_KEYS.length];
+  groqKeyIndex++;
   return key;
 }
 
+// ─── GEMINI KEYS & OPENROUTER ───
+const GEMINI_KEYS = [
+  process.env.GEMINI_API_KEY_ONE,
+  process.env.GEMINI_API_KEY_TWO,
+  process.env.GEMINI_API_KEY_THREE,
+  process.env.GEMINI_API_KEY_FOUR,
+  process.env.GEMINI_API_KEY_FIVE,
+  process.env.GEMINI_API_KEY_SIX,
+  process.env.GEMINI_API_KEY_SEVEN,
+  process.env.GEMINI_API_KEY_EIGHT,
+  process.env.GEMINI_API_KEY_NINE || process.env.GEMINI_API_NINE,
+].filter(Boolean);
+
+const OPENROUTER_KEY = process.env.OPENROUTER_API_KEY;
+const OPENROUTER_VISION_MODEL = process.env.OPENROUTER_VISION_MODEL || "minimax/minimax-m3.1-flash:free";
+const OPENROUTER_ENDPOINT = process.env.OPENROUTER_ENDPOINT || "https://openrouter.ai/api/v1/chat/completions";
+
 function parseMaybeJson(content) {
-  // Strip reasoning block if present (handles both closed and unclosed <think> tags) I did it 
+  if (!content || typeof content !== "string") {
+    throw new Error("Cannot parse empty content as JSON");
+  }
+
+  // Strip reasoning block if present
   let cleaned = content.replace(/<think>[\s\S]*?(?:<\/think>|$)/g, "").trim();
 
   // Strip markdown code fences if present
@@ -65,79 +79,179 @@ function parseMaybeJson(content) {
   }
 }
 
-// ─── GEMINI KEYS ROTATION ───
-const GEMINI_KEYS = [
-  process.env.GEMINI_API_KEY,
-  process.env.GEMINI_API_KEY_ONE,
-  process.env.GEMINI_API_KEY_TWO,
-  process.env.GEMINI_API_KEY_THREE,
-  process.env.GEMINI_API_KEY_FOUR,
-  process.env.GEMINI_API_KEY_FIVE,
-  process.env.GEMINI_API_KEY_SIX,
-  process.env.GEMINI_API_KEY_SEVEN,
-  process.env.GEMINI_API_KEY_EIGHT,
-].filter(Boolean);
-
-let geminiKeyIndex = 0;
-function getNextGeminiApiKey() {
-  if (GEMINI_KEYS.length === 0) return null;
-  const key = GEMINI_KEYS[geminiKeyIndex % GEMINI_KEYS.length];
-  geminiKeyIndex++;
-  return key;
+/**
+ * Builds the inline contents array for Gemini SDK.
+ * @param {Array<{base64: string, mimeType: string}>} images
+ * @param {string} prompt
+ */
+function buildGeminiContents(images, prompt) {
+  const contents = [];
+  for (const img of images) {
+    contents.push({
+      inlineData: {
+        data: img.base64,
+        mimeType: img.mimeType || "image/jpeg"
+      }
+    });
+  }
+  contents.push(prompt);
+  return contents;
 }
 
-const { GoogleGenAI } = require("@google/genai");
+/**
+ * Executes a single request to Gemini via the @google/genai SDK.
+ */
+async function sendToGeminiKey(apiKey, prompt, images) {
+  const ai = new GoogleGenAI({ apiKey });
+  const contents = buildGeminiContents(images, prompt);
+
+  const response = await ai.models.generateContent({
+    model: "gemini-3.1-flash-lite",
+    contents,
+    config: {
+      responseMimeType: "application/json"
+    }
+  });
+
+  return parseMaybeJson(response.text);
+}
 
 /**
- * extractWithFallback — Calls Google Gemini API for fast, high-limit OCR/Vision.
- * Runs key rotation in round-robin and retries other keys on quota/failures.
- * @param {string}  prompt
- * @param {string}  base64Image
- * @param {string}  [imageUrl]
+ * Races a batch of keys concurrently using Promise.any.
+ * Returns the first key that succeeds with parsed JSON.
  */
-async function extractWithFallback(prompt, base64Image, imageUrl) {
-  const attemptsCount = GEMINI_KEYS.length > 0 ? GEMINI_KEYS.length : 1;
+async function executeBatchOfGeminiKeys(keys, batchName, prompt, images) {
+  if (!keys || keys.length === 0) {
+    throw new Error(`[Batch ${batchName}] No keys configured.`);
+  }
+
+  console.log(`[ModelRouter] [${batchName}] Dispatching batch of ${keys.length} keys in parallel...`);
+
+  const promises = keys.map(async (key, index) => {
+    try {
+      const res = await sendToGeminiKey(key, prompt, images);
+      console.log(`[ModelRouter] [${batchName}] Key ending in ...${key.slice(-6)} (index ${index + 1}) succeeded!`);
+      return res;
+    } catch (err) {
+      console.warn(`[ModelRouter] [${batchName}] Key ending in ...${key.slice(-6)} (index ${index + 1}) failed: ${err.message}`);
+      throw err;
+    }
+  });
+
+  try {
+    return await Promise.any(promises);
+  } catch (aggregateErr) {
+    console.warn(`[ModelRouter] [${batchName}] All ${keys.length} keys in this batch failed.`);
+    throw aggregateErr;
+  }
+}
+
+/**
+ * Fallback to OpenRouter using OpenAI-compatible vision chat completion.
+ */
+async function sendToOpenRouter(prompt, images) {
+  if (!OPENROUTER_KEY) {
+    throw new Error("OpenRouter API key is not configured.");
+  }
+
+  console.log(`[ModelRouter] [Stage 3] Dispatching to OpenRouter using model "${OPENROUTER_VISION_MODEL}"...`);
+
+  const contentItems = [{ type: "text", text: prompt }];
+  for (const img of images) {
+    contentItems.push({
+      type: "image_url",
+      image_url: {
+        url: `data:${img.mimeType || "image/jpeg"};base64,${img.base64}`
+      }
+    });
+  }
+
+  const response = await axios.post(
+    OPENROUTER_ENDPOINT,
+    {
+      model: OPENROUTER_VISION_MODEL,
+      messages: [
+        {
+          role: "user",
+          content: contentItems
+        }
+      ],
+      temperature: 0.1,
+      max_tokens: 1024
+    },
+    {
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${OPENROUTER_KEY}`
+      },
+      timeout: 30000
+    }
+  );
+
+  const text = response.data?.choices?.[0]?.message?.content;
+  return parseMaybeJson(text);
+}
+
+/**
+ * Executes a vision prompt with 3-Stage Fallback:
+ *  Stage 1: First 4 Gemini keys (sent in parallel batch, first to succeed wins)
+ *  Stage 2: Next 5 Gemini keys (sent in parallel batch, first to succeed wins)
+ *  Stage 3: OpenRouter API key
+ *
+ * @param {string} prompt
+ * @param {Array<{base64: string, mimeType: string}>} images
+ */
+async function executeVisionPipeline(prompt, images) {
+  const stage1Keys = GEMINI_KEYS.slice(0, 4);
+  const stage2Keys = GEMINI_KEYS.slice(4, 9);
+
   let lastError = null;
 
-  for (let attempt = 0; attempt < attemptsCount; attempt++) {
-    const apiKey = getNextGeminiApiKey() || process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      console.error("❌ Gemini Vision failed: No Gemini API Key configured.");
-      return null;
-    }
-
+  // ── Stage 1: First 4 Gemini keys ───────────────────────────────────────────
+  if (stage1Keys.length > 0) {
     try {
-      const ai = new GoogleGenAI({ apiKey });
-
-      const response = await ai.models.generateContent({
-        model: "gemini-3.1-flash-lite",
-        contents: [
-          {
-            inlineData: {
-              data: base64Image,
-              mimeType: "image/jpeg"
-            }
-          },
-          prompt
-        ],
-        config: {
-          responseMimeType: "application/json"
-        }
-      });
-
-      return parseMaybeJson(response.text);
+      console.log("[ModelRouter] [Stage 1/3] Attempting first 4 Gemini keys in parallel...");
+      const result = await executeBatchOfGeminiKeys(stage1Keys, "Stage 1 (Keys 1-4)", prompt, images);
+      return result;
     } catch (err) {
       lastError = err;
-      console.warn(`⚠️ Gemini API attempt ${attempt + 1}/${attemptsCount} failed using key ending in ...${apiKey ? apiKey.slice(-6) : "None"}: ${err.message}`);
-      if (attempt < attemptsCount - 1) {
-        // Wait briefly before retrying next key
-        await new Promise(r => setTimeout(r, 300));
-      }
     }
   }
 
-  console.error("❌ All Gemini API keys failed vision extraction. Last error:", lastError?.message);
+  // ── Stage 2: Next 5 Gemini keys ────────────────────────────────────────────
+  if (stage2Keys.length > 0) {
+    try {
+      console.log("[ModelRouter] [Stage 2/3] Attempting next 5 Gemini keys in parallel...");
+      const result = await executeBatchOfGeminiKeys(stage2Keys, "Stage 2 (Keys 5-9)", prompt, images);
+      return result;
+    } catch (err) {
+      lastError = err;
+    }
+  }
+
+  // ── Stage 3: OpenRouter ────────────────────────────────────────────────────
+  if (OPENROUTER_KEY) {
+    try {
+      console.log("[ModelRouter] [Stage 3/3] Attempting OpenRouter fallback...");
+      const result = await sendToOpenRouter(prompt, images);
+      return result;
+    } catch (err) {
+      lastError = err;
+      console.error("[ModelRouter] [Stage 3/3] OpenRouter failed:", err.message);
+    }
+  } else {
+    console.warn("[ModelRouter] Stage 3 skipped: OPENROUTER_API_KEY not configured.");
+  }
+
+  console.error("❌ All 3 stages of vision fallback failed. Last error:", lastError?.message);
   return null;
+}
+
+/**
+ * Single-image vision fallback helper (backward compatible).
+ */
+async function extractWithFallback(prompt, base64Image, imageUrl = null, mimeType = "image/jpeg") {
+  return executeVisionPipeline(prompt, [{ base64: base64Image, mimeType }]);
 }
 
 // Text-only reasoning — groq-sdk is fine here (no large payloads)
@@ -165,5 +279,10 @@ async function analyzeRunsWithReasoning(prompt) {
   }
 }
 
-module.exports = { extractWithFallback, analyzeRunsWithReasoning };
-
+module.exports = {
+  extractWithFallback,
+  executeVisionPipeline,
+  analyzeRunsWithReasoning,
+  GEMINI_KEYS,
+  OPENROUTER_KEY
+};
