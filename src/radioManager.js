@@ -37,6 +37,27 @@ async function handleRadioMessage(message) {
 
   const senderGuildId = message.guild.id;
 
+  // Enforce the driver's registered VTC lock before processing any transmission.
+  // A driver may transmit from their own VTC, or from HQ (the HQ/NMC exception).
+  // Messages sent from another VTC are silently ignored: no replies, logs, or reactions.
+  const isHqServer = senderGuildId === process.env.HQ_GUILD_ID;
+  if (!isHqServer) {
+    const { data: player, error: playerError } = await supabase
+      .from("players")
+      .select("guild_id")
+      .eq("discord_id", message.author.id)
+      .maybeSingle();
+
+    if (playerError) {
+      console.error("[RadioManager] Failed to verify sender's registered VTC:", playerError);
+      return;
+    }
+
+    // Unregistered users and independent drivers cannot transmit from VTC servers.
+    if (!player || !player.guild_id || player.guild_id !== senderGuildId) {
+      return;
+    }
+  }
 
   // 1. Fetch sender's radio frequency and configuration
   const { data: senderGuild, error: senderError } = await supabase
